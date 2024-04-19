@@ -7,7 +7,7 @@
 
 ;; This file is NOT part of GNU Emacs.
 
-;; Copyright (c) 2023 Paul Huang
+;; Copyright (c) 2023-2024 Paul Huang
 ;; All rights reserved.
 ;;
 ;; Redistribution and use in source and binary forms, with or without
@@ -34,28 +34,52 @@
 
 ;;; Commentary:
 
-;; Add commentary here
+;; TBD
 
 ;;; Code:
-(eval-when-compile (require 'pcase))
+(setq initial-major-mode 'org-mode
+      initial-scratch-message nil)
 
-(defun scratchpad-open-other-window ()
+(defgroup scratchpad nil
+  "filler"
+  :group 'files
+  :prefix "scratchpad-")
+  
+(defcustom scratchpad-buffer-name "*scratch*"
+  "Custom scratchpad buffer name."
+  :type 'string
+  :group 'persistent-scratch)
+
+(defcustom scratchpad-save-file
+  (expand-file-name "scratchpad.org" user-emacs-directory)
+  "File storing scratchpad contents."
+  :type 'file
+  :group 'persistent-scratch)
+
+(defun scratchpad-restore-contents ()
+  "Restore scratchpad file contents."
+  (interactive)
+  (with-current-buffer (get-buffer-create scratchpad-buffer-name)
+    (insert-file-contents scratchpad-save-file)))
+
+(defun scratchpad-other-window ()
   "Open the *scratch* buffer in a new window."
   (interactive)
-  (switch-to-buffer-other-window (get-buffer-create "*scratch*")))
+  (switch-to-buffer-other-window (get-buffer-create scratchpad-buffer-name)))
 
-(defun scratchpad-toggle-other-window ()
-  "Toggle between *scratch* buffer and the current buffer."
+(defun scratchpad-toggle-scratchpad ()
+  "Toggle scratchpad buffer."
   (interactive)
-  (if (string= (buffer-name) "*scratch*")
+  (if (string= (buffer-name) scratchpad-buffer-name)
       (delete-window)
     (let ((selected-text (when (region-active-p)
                            (buffer-substring-no-properties (region-beginning) (region-end)))))
       (when selected-text
-        (with-current-buffer (get-buffer-create "*scratch*")
+        (with-current-buffer (get-buffer-create scratchpad-buffer-name)
           (goto-char (point-max))
           (insert selected-text "\n"))))
-    (scratchpad-open-other-window)))
+    (scratchpad-other-window)))
+
 
 (provide 'scratchpad)
 ;;; scratchpad.el ends here
