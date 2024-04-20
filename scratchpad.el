@@ -1,61 +1,94 @@
-;;; scratchpad.el --- Use the scratch buffer as a capture and edit space -*- lexical-binding: t -*-
+;;; scratchpad.el --- Use the scratch buffer as a capture and edit space  -*- lexical-binding: t -*-
 
-;; Author: Paul Huang <polhuang@proton.me>
-;; URL: https://github.com/polhuang/scratchpad
+;; Copyright (c) 2023-2024 Paul Huang
+;;
+;; Author     : Paul Huang <paulleehuang.proton.me>
+;; URL        : https://github.com/polhuang/scratchpad
+;;
+;; This file is not part of GNU Emacs.
+;;
+;;; License: GPLv3
+;;
+;; Created: December 31, 2023
 ;; Package-Version: 0.0.0
-;; Package-Requires: ((emacs "28"))
-
-;; This file is NOT part of GNU Emacs.
-
-;; Copyright (c) 2023 Paul Huang
-;; All rights reserved.
-;;
-;; Redistribution and use in source and binary forms, with or without
-;; modification, are permitted provided that the following conditions are
-;; met:
-;;
-;;   * Redistributions of source code must retain the above copyright
-;;     notice, this list of conditions and the following disclaimer.
-;;   * Redistributions in binary form must reproduce the above copyright
-;;     notice, this list of conditions and the following disclaimer in the
-;;     documentation and/or other materials provided with the distribution.
-;;
-;; THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
-;; IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
-;; TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
-;; PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
-;; OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-;; EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-;; PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-;; PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-;; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-;; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-;; SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
+;; Keywords: scratch, capture, notes, note-taking, tools, buffer
+;; Package-Requires: ((Emacs "26.1"))
 ;;; Commentary:
 
-;; Add commentary here
+;; An extensible Emacs dashboard, with sections for
+;; bookmarks, projects (projectile or project.el), org-agenda and more.
 
 ;;; Code:
-(eval-when-compile (require 'pcase))
 
-(defun scratchpad-open-other-window ()
+(require 'recentf)
+
+;;
+;;; Customization
+
+(defgroup scratchpad nil
+  "Scratch buffer with capture and edit."
+  :group 'files
+  :prefix "scratchpad-")
+  
+(defcustom scratchpad-buffer-name "*scratch*"
+  "Custom scratchpad buffer name."
+  :type 'string
+  :group 'scratchpad)
+
+(defcustom scratchpad-save-file
+  (expand-file-name "scratchpad.org" user-emacs-directory)
+  "File storing scratchpad contents."
+  :type 'file
+  :group 'scratchpad)
+
+(defcustom scratchpad-autosave-interval 120
+  "The interval (in seconds) at which scratchpad will auto-save to file."
+  :type 'number
+  :group 'scratchpad)
+ 
+(defcustom scratchpad-major-mode-initial
+  (if (fboundp 'org-mode)
+      'org-mode
+    'lisp-interaction-mode)
+  "The major mode scratchpad will use at initialization. Defaults to 'org mode' if installed; otherwise, defaults to 'lisp-interaction-mode'."
+  :type 'function
+  :group 'scratchpad)
+
+;;
+;;; Functions
+
+;;;###autoload
+(defun scratchpad-initialize ()
+  "Format '*scratch*' buffer if already created."
+  (setq initial-scratch-message nil)
+  (scratchpad-restore-contents))
+
+(defun scratchpad-other-window ()
   "Open the *scratch* buffer in a new window."
   (interactive)
-  (switch-to-buffer-other-window (get-buffer-create "*scratch*")))
+  (switch-to-buffer-other-window (get-buffer-create scratchpad-buffer-name)))
 
-(defun scratchpad-toggle-other-window ()
-  "Toggle between *scratch* buffer and the current buffer."
+;;;###autoload
+(defun scratchpad-restore-contents ()
+  "Restore scratchpad file contents."
   (interactive)
-  (if (string= (buffer-name) "*scratch*")
+  (with-current-buffer (get-buffer-create scratchpad-buffer-name)
+    (insert-file-contents scratchpad-save-file)))
+
+;;;###autoload
+(defun scratchpad-toggle ()
+  "Toggle scratchpad buffer."
+  (interactive)
+  (if (string= (buffer-name) scratchpad-buffer-name)
       (delete-window)
     (let ((selected-text (when (region-active-p)
                            (buffer-substring-no-properties (region-beginning) (region-end)))))
       (when selected-text
-        (with-current-buffer (get-buffer-create "*scratch*")
+        (with-current-buffer (get-buffer-create scratchpad-buffer-name)
           (goto-char (point-max))
           (insert selected-text "\n"))))
-    (scratchpad-open-other-window)))
+    (scratchpad-other-window)))
 
 (provide 'scratchpad)
+(scratchpad-initialize)
 ;;; scratchpad.el ends here
