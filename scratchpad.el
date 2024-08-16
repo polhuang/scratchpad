@@ -57,6 +57,9 @@
 ;;
 ;;; Functions
 
+;; add contents to save file as an org line item, then wipe
+;; make persistent
+
 ;;;###autoload
 (defun scratchpad-initialize ()
   "Format '*scratch*' buffer if already created."
@@ -88,6 +91,20 @@
           (goto-char (point-max))
           (insert selected-text "\n"))))
     (scratchpad-other-window)))
+
+(defun scratchpad-save-current ()
+  "Save the contents of '*scratch*' buffer to `scratchpad-save-file` as a heading."
+  (interactive)
+  (let* ((scratch-buffer (get-buffer scratchpad-buffer-name))
+         (timestamp (format-time-string "%Y-%m-%d %H:%M"))
+         (content (with-current-buffer scratch-buffer
+                    (buffer-string))))
+    (when (and scratch-buffer (not (string-empty-p content)))
+      (with-temp-buffer
+        (insert (concat "* " timestamp "\n" content "\n"))
+        (append-to-file (point-min) (point-max) scratchpad-save-file))
+      (with-current-buffer scratch-buffer
+        (erase-buffer)))))
 
 (provide 'scratchpad)
 (scratchpad-initialize)
