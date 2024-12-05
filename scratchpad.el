@@ -72,8 +72,6 @@ otherwise, defaults to `lisp-interaction-mode'."
   :type 'string
   :group 'scratchpad)
 
-
-
 ;;
 ;;; Functions
 
