@@ -42,14 +42,19 @@
   :type 'directory
   :group 'scratchpad)
 
-(defcustom scratchpad-save-file
+(defcustom scratchpad-current-backup-file
   (expand-file-name "current-scratch.org" scratchpad-save-directory)
   "Current file storing scratchpad contents."
   :type 'file
   :group 'scratchpad)
+  
+(defcustom scratchpad-archive-filename-format "%Y-%m-%d--%H-%M-%S-%N"
+  "Format of backup file names, for `format-time-string'."
+  :type 'string
+  :group 'scratchpad)
 
 (defcustom scratchpad-autosave-interval 60
-  "The interval (in seconds) at which scratchpad will auto-save to file."
+  "The interval (in seconds) at which scratchpad will backup to file."
   :type 'number
   :group 'scratchpad)
  
@@ -67,6 +72,8 @@ otherwise, defaults to `lisp-interaction-mode'."
   :type 'string
   :group 'scratchpad)
 
+
+
 ;;
 ;;; Functions
 
@@ -78,28 +85,10 @@ otherwise, defaults to `lisp-interaction-mode'."
     (make-directory scratchpad-save-directory t))
   (scratchpad-restore-contents)
   (with-current-buffer scratchpad-buffer-name
-    (local-set-key (kbd scratchpad-menu-key) #'scratchpad-help)))
-
-(defun scratchpad-other-window ()
-  "Open the *scratch* buffer in a new window."
-  (interactive)
-  (switch-to-buffer-other-window (get-buffer-create scratchpad-buffer-name)))
-
-(defun scratchpad-restore-contents ()
-  "Restore the latest heading from the scratchpad file contents."
-  (interactive)
-  (with-current-buffer (get-buffer-create scratchpad-buffer-name)
-    (erase-buffer)
-    (when (file-exists-p scratchpad-save-file)
-      (with-temp-buffer
-        (insert-file-contents scratchpad-save-file)
-        (goto-char (point-max))
-        (when (re-search-backward "^\\* [0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}" nil t)  ; Find last timestamp heading
-          (let ((start (point)))
-            (forward-line)  ; Skip the heading line
-            (let ((content (buffer-substring-no-properties (point) (point-max))))
-              (with-current-buffer scratchpad-buffer-name
-                (insert content)))))))))
+    (unless (eq major-mode scratchpad-major-mode-initial)
+      (funcall scratchpad-major-mode-initial))
+    (scratchpad-mode 1)
+    (run-hooks 'scratchpad-initialize-hook)))
 
 ;;;###autoload
 (defun scratchpad-toggle ()
@@ -118,18 +107,40 @@ otherwise, defaults to `lisp-interaction-mode'."
           (insert selected-text "\n"))))
     (scratchpad-other-window)))
 
+;;;###autoload
+(defun scratchpad-other-window ()
+  "Open the *scratch* buffer in a new window."
+  (interactive)
+  (switch-to-buffer-other-window (get-buffer-create scratchpad-buffer-name)))
+
+(defun scratchpad-restore-contents ()
+  "Restore the latest heading from the scratchpad file contents."
+  (interactive)
+  (with-current-buffer (get-buffer-create scratchpad-buffer-name)
+    (erase-buffer)
+    (when (file-exists-p scratchpad-current-backup-file)
+      (with-temp-buffer
+        (insert-file-contents scratchpad-current-backup-file)
+        (goto-char (point-max))
+        (when (re-search-backward "^\\* [0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}" nil t)
+          (let ((start (point)))
+            (forward-line)
+            (let ((content (buffer-substring-no-properties (point) (point-max))))
+              (with-current-buffer scratchpad-buffer-name
+                (insert content)))))))))
+
 (defun scratchpad-save-buffer ()
-  "Save the contents of '*scratch*' buffer to `scratchpad-save-file` so that it can be restored later."
+  "Save the contents of '*scratch*' buffer to `scratchpad-current-backup-file` so that it can be restored later."
   (interactive)
   (with-current-buffer scratchpad-buffer-name
-    (write-region (point-min) (point-max) scratchpad-save-file)))    
+    (write-region (point-min) (point-max) scratchpad-current-backup-file)))    
 
 (defun scratchpad-archive-buffer ()
   "Save the contents of '*scratch*' buffer to a new file with a timestamp heading."
   (interactive)
   (let* ((timestamp (format-time-string "%Y-%m-%d %I:%M %p"))
          (archive-file (expand-file-name 
-                       (format-time-string "%Y-%m-%d - Scratchpad.org")
+                       (format-time-string scratchpad-archive-filename-format)
                        scratchpad-save-directory))
          (content (with-current-buffer scratchpad-buffer-name
                    (buffer-string))))
@@ -159,7 +170,18 @@ otherwise, defaults to `lisp-interaction-mode'."
   (interactive)
   (scratchpad-menu))
 
-(define-key (current-global-map) (kbd scratchpad-menu-key) #'scratchpad-help)
+(defvar scratchpad-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd scratchpad-menu-key) #'scratchpad-help)
+    map)
+  "Keymap for `scratchpad-mode'.")
+
+(define-minor-mode scratchpad-mode
+  "Minor mode for scratchpad functionality.
+When enabled, provides keybindings and functionality for scratchpad operations."
+  :lighter " Scratch"
+  :keymap scratchpad-mode-map
+  :group 'scratchpad)
 
 (provide 'scratchpad)
 (scratchpad-initialize)
