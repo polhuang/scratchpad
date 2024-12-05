@@ -36,13 +36,19 @@
   :type 'string
   :group 'scratchpad)
 
+(defcustom scratchpad-save-directory
+  (expand-file-name "scratchpad" "~/org")
+  "Directory where scratchpad files are stored."
+  :type 'directory
+  :group 'scratchpad)
+
 (defcustom scratchpad-save-file
-  (expand-file-name "scratchpad.org" user-emacs-directory)
-  "File storing scratchpad contents."
+  (expand-file-name "current-scratch.org" scratchpad-save-directory)
+  "Current file storing scratchpad contents."
   :type 'file
   :group 'scratchpad)
 
-(defcustom scratchpad-autosave-interval 120
+(defcustom scratchpad-autosave-interval 60
   "The interval (in seconds) at which scratchpad will auto-save to file."
   :type 'number
   :group 'scratchpad)
@@ -68,6 +74,8 @@ otherwise, defaults to `lisp-interaction-mode'."
 (defun scratchpad-initialize ()
   "Format '*scratch*' buffer if already created."
   (setq initial-scratch-message nil)
+  (unless (file-exists-p scratchpad-save-directory)
+    (make-directory scratchpad-save-directory t))
   (scratchpad-restore-contents)
   (with-current-buffer scratchpad-buffer-name
     (local-set-key (kbd scratchpad-menu-key) #'scratchpad-help)))
@@ -98,9 +106,11 @@ otherwise, defaults to `lisp-interaction-mode'."
   "Toggle scratchpad buffer."
   (interactive)
   (if (string= (buffer-name) scratchpad-buffer-name)
-      (delete-window)
+      (progn
+        (scratchpad-save-buffer)  ; Save only when we're in the scratchpad buffer
+        (delete-window))
     (let ((selected-text (when (region-active-p)
-                           (buffer-substring-no-properties (region-beginning) (region-end)))))
+                          (buffer-substring-no-properties (region-beginning) (region-end)))))
       (when selected-text
         (with-current-buffer (get-buffer-create scratchpad-buffer-name)
           (goto-char (point-max))
@@ -108,24 +118,34 @@ otherwise, defaults to `lisp-interaction-mode'."
           (insert selected-text "\n"))))
     (scratchpad-other-window)))
 
-(defun scratchpad-save-current ()
-  "Save the contents of '*scratch*' buffer to `scratchpad-save-file` as a heading."
+(defun scratchpad-save-buffer ()
+  "Save the contents of '*scratch*' buffer to `scratchpad-save-file` so that it can be restored later."
+  (interactive)
+  (with-current-buffer scratchpad-buffer-name
+    (write-region (point-min) (point-max) scratchpad-save-file)))    
+
+(defun scratchpad-archive-buffer ()
+  "Save the contents of '*scratch*' buffer to a new file with a timestamp heading."
   (interactive)
   (let* ((timestamp (format-time-string "%Y-%m-%d %I:%M %p"))
+         (archive-file (expand-file-name 
+                       (format-time-string "%Y-%m-%d - Scratchpad.org")
+                       scratchpad-save-directory))
          (content (with-current-buffer scratchpad-buffer-name
-                    (buffer-string))))
+                   (buffer-string))))
     (when (and scratchpad-buffer-name (not (string-empty-p content)))
+      (unless (file-exists-p archive-file)
+        (with-temp-file archive-file
+          (insert (concat "* " timestamp "\n"))))
       (with-temp-buffer
         (insert (concat "* " timestamp "\n" content "\n"))
-        (append-to-file (point-min) (point-max) scratchpad-save-file))
-      (with-current-buffer scratchpad-buffer-name
-        (erase-buffer)))))
+        (append-to-file (point-min) (point-max) archive-file)))))
 
 (defun scratchpad-toggle-new ()
   "Start a new scratchpad. This will save and then wipe the `*scratch*' buffer."
   (interactive)
   (with-current-buffer scratchpad-buffer-name
-    (scratchpad-save-current)
+    (scratchpad-archive-buffer)
     (erase-buffer)))
 
 (transient-define-prefix scratchpad-menu ()
@@ -143,4 +163,6 @@ otherwise, defaults to `lisp-interaction-mode'."
 
 (provide 'scratchpad)
 (scratchpad-initialize)
+
+(run-with-timer 0 scratchpad-autosave-interval #'scratchpad-save-buffer)
 ;;; scratchpad.el ends here
