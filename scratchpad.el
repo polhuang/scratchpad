@@ -21,6 +21,7 @@
 ;;; Code:
 
 (require 'recentf)
+(require 'transient)
 
 ;;
 ;;; Customization
@@ -50,33 +51,47 @@
   (if (fboundp 'org-mode)
       'org-mode
     'lisp-interaction-mode)
-  "The major mode scratchpad will use at initialization. Defaults to 'org mode' if installed; otherwise, defaults to 'lisp-interaction-mode'."
+  "Initial major mode for scratchpad. Defaults to `org-mode' if installed;
+otherwise, defaults to `lisp-interaction-mode'."
   :type 'function
+  :group 'scratchpad)
+
+(defcustom scratchpad-menu-key "C->"
+  "Key binding to activate the scratchpad menu in the scratch buffer."
+  :type 'string
   :group 'scratchpad)
 
 ;;
 ;;; Functions
 
-;; add contents to save file as an org line item, then wipe
-;; make persistent
-
 ;;;###autoload
 (defun scratchpad-initialize ()
   "Format '*scratch*' buffer if already created."
   (setq initial-scratch-message nil)
-  (scratchpad-restore-contents))
+  (scratchpad-restore-contents)
+  (with-current-buffer scratchpad-buffer-name
+    (local-set-key (kbd scratchpad-menu-key) #'scratchpad-help)))
 
 (defun scratchpad-other-window ()
   "Open the *scratch* buffer in a new window."
   (interactive)
   (switch-to-buffer-other-window (get-buffer-create scratchpad-buffer-name)))
 
-;;;###autoload
 (defun scratchpad-restore-contents ()
-  "Restore scratchpad file contents."
+  "Restore the latest heading from the scratchpad file contents."
   (interactive)
   (with-current-buffer (get-buffer-create scratchpad-buffer-name)
-    (insert-file-contents scratchpad-save-file)))
+    (erase-buffer)
+    (when (file-exists-p scratchpad-save-file)
+      (with-temp-buffer
+        (insert-file-contents scratchpad-save-file)
+        (goto-char (point-max))
+        (when (re-search-backward "^\\* [0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}" nil t)  ; Find last timestamp heading
+          (let ((start (point)))
+            (forward-line)  ; Skip the heading line
+            (let ((content (buffer-substring-no-properties (point) (point-max))))
+              (with-current-buffer scratchpad-buffer-name
+                (insert content)))))))))
 
 ;;;###autoload
 (defun scratchpad-toggle ()
@@ -89,22 +104,42 @@
       (when selected-text
         (with-current-buffer (get-buffer-create scratchpad-buffer-name)
           (goto-char (point-max))
+          (set-mark (point))
           (insert selected-text "\n"))))
     (scratchpad-other-window)))
 
 (defun scratchpad-save-current ()
   "Save the contents of '*scratch*' buffer to `scratchpad-save-file` as a heading."
   (interactive)
-  (let* ((scratch-buffer (get-buffer scratchpad-buffer-name))
-         (timestamp (format-time-string "%Y-%m-%d %H:%M"))
-         (content (with-current-buffer scratch-buffer
+  (let* ((timestamp (format-time-string "%Y-%m-%d %I:%M %p"))
+         (content (with-current-buffer scratchpad-buffer-name
                     (buffer-string))))
-    (when (and scratch-buffer (not (string-empty-p content)))
+    (when (and scratchpad-buffer-name (not (string-empty-p content)))
       (with-temp-buffer
         (insert (concat "* " timestamp "\n" content "\n"))
         (append-to-file (point-min) (point-max) scratchpad-save-file))
-      (with-current-buffer scratch-buffer
+      (with-current-buffer scratchpad-buffer-name
         (erase-buffer)))))
+
+(defun scratchpad-toggle-new ()
+  "Start a new scratchpad. This will save and then wipe the `*scratch*' buffer."
+  (interactive)
+  (with-current-buffer scratchpad-buffer-name
+    (scratchpad-save-current)
+    (erase-buffer)))
+
+(transient-define-prefix scratchpad-menu ()
+  "Scratchpad menu."
+  ["Actions"
+   ("n" "New scratchpad" scratchpad-toggle-new)
+   ("." "Quit" transient-quit-one)])
+
+(defun scratchpad-help ()
+  "Show the scratchpad help menu."
+  (interactive)
+  (scratchpad-menu))
+
+(define-key (current-global-map) (kbd scratchpad-menu-key) #'scratchpad-help)
 
 (provide 'scratchpad)
 (scratchpad-initialize)
