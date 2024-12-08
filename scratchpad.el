@@ -2,7 +2,7 @@
 
 ;; Copyright (c) 2023-2024 Paul Huang
 ;;
-;; Author     : Paul Huang <paulleehuang.proton.me>
+;; Author     : Paul Huang <paulleehuang@proton.me>
 ;; URL        : https://github.com/polhuang/scratchpad
 ;;
 ;; This file is not part of GNU Emacs.
@@ -15,8 +15,7 @@
 ;; Package-Requires: ((Emacs "26.1"))
 ;;; Commentary:
 
-;; An extensible Emacs dashboard, with sections for
-;; bookmarks, projects (projectile or project.el), org-agenda and more.
+;; A persistent scratchpad with auto-save capabilities
 
 ;;; Code:
 
@@ -48,7 +47,7 @@
   :type 'file
   :group 'scratchpad)
   
-(defcustom scratchpad-archive-filename-format "%Y-%m-%d--%H-%M-%S-%N"
+(defcustom scratchpad-archive-filename-format "%Y-%m-%d.org"
   "Format of backup file names, for `format-time-string'."
   :type 'string
   :group 'scratchpad)
@@ -131,21 +130,18 @@ otherwise, defaults to `lisp-interaction-mode'."
   "Save the contents of '*scratch*' buffer to `scratchpad-current-backup-file` so that it can be restored later."
   (interactive)
   (with-current-buffer scratchpad-buffer-name
-    (write-region (point-min) (point-max) scratchpad-current-backup-file)))    
+    (write-region (point-min) (point-max) scratchpad-current-backup-file)))
 
 (defun scratchpad-archive-buffer ()
   "Save the contents of '*scratch*' buffer to a new file with a timestamp heading."
   (interactive)
   (let* ((timestamp (format-time-string "%Y-%m-%d %I:%M %p"))
-         (archive-file (expand-file-name 
+         (archive-file (expand-file-name
                        (format-time-string scratchpad-archive-filename-format)
                        scratchpad-save-directory))
          (content (with-current-buffer scratchpad-buffer-name
                    (buffer-string))))
     (when (and scratchpad-buffer-name (not (string-empty-p content)))
-      (unless (file-exists-p archive-file)
-        (with-temp-file archive-file
-          (insert (concat "* " timestamp "\n"))))
       (with-temp-buffer
         (insert (concat "* " timestamp "\n" content "\n"))
         (append-to-file (point-min) (point-max) archive-file)))))
