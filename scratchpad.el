@@ -1,4 +1,4 @@
-;;; scratchpad.el --- Use the scratch buffer as a capture and edit space  -*- lexical-binding: t -*-
+scr;;; scratchpad.el --- Use the scratch buffer as a capture and edit space  -*- lexical-binding: t -*-
 
 ;; Copyright (c) 2023-2024 Paul Huang
 ;;
@@ -41,9 +41,15 @@
   :type 'directory
   :group 'scratchpad)
 
-(defcustom scratchpad-current-backup-file
+(defcustom scratchpad-current-file
   (expand-file-name "current-scratch.org" scratchpad-save-directory)
   "Current file storing scratchpad contents."
+  :type 'file
+  :group 'scratchpad)
+
+(defcustom scratchpad-current-metadata-file
+  (expand-file-name ".scratchpad-current" scratchpad-save-directory)
+  "File to preserve metadata for current scratchpad across Emacs sessions."
   :type 'file
   :group 'scratchpad)
   
@@ -66,10 +72,29 @@ otherwise, defaults to `lisp-interaction-mode'."
   :type 'function
   :group 'scratchpad)
 
-(defcustom scratchpad-menu-key "C->"
+(defcustom scratchpad-menu-key "C-c s"
   "Key binding to activate the scratchpad menu in the scratch buffer."
   :type 'string
   :group 'scratchpad)
+
+(defcustom scratchpad-autosave-on-exit t
+  "If non-nil, automatically save the scratchpad before exiting Emacs."
+  :type 'boolean
+  :group 'scratchpad)
+
+(defcustom scratchpad-autosave-on-focus-change nil
+  "If non-nil, automatically save the scratchpad when Emacs loses focus."
+  :type 'boolean
+  :group 'scratchpad)
+
+(defvar scratchpad-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd scratchpad-menu-key) #'scratchpad-menu-open)
+    map)
+  "Keymap for `scratchpad-mode'.")
+
+(define-derived-mode scratchpad-mode org-mode "scratch"
+  "Special mode for scratchpad buffers.")
 
 ;;
 ;;; Functions
@@ -80,11 +105,15 @@ otherwise, defaults to `lisp-interaction-mode'."
   (setq initial-scratch-message nil)
   (unless (file-exists-p scratchpad-save-directory)
     (make-directory scratchpad-save-directory t))
+  (unless (file-exists-p scratchpad-current-metadata-file)
+    (with-temp-file scratchpad-current-metadata-file
+      (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))))
+    (message "Scratchpad metadata file created"))
   (scratchpad-restore-contents)
   (with-current-buffer scratchpad-buffer-name
     (unless (eq major-mode scratchpad-major-mode-initial)
       (funcall scratchpad-major-mode-initial))
-    (scratchpad-mode 1)
+    (scratchpad-mode)
     (run-hooks 'scratchpad-initialize-hook)))
 
 ;;;###autoload
@@ -111,47 +140,68 @@ otherwise, defaults to `lisp-interaction-mode'."
   (switch-to-buffer-other-window (get-buffer-create scratchpad-buffer-name)))
 
 (defun scratchpad-restore-contents ()
-  "Restore the latest heading from the scratchpad file contents."
+  "Restore all contents from the scratchpad backup file."
   (interactive)
   (with-current-buffer (get-buffer-create scratchpad-buffer-name)
     (erase-buffer)
-    (when (file-exists-p scratchpad-current-backup-file)
-      (with-temp-buffer
-        (insert-file-contents scratchpad-current-backup-file)
-        (goto-char (point-max))
-        (when (re-search-backward "^\\* [0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}" nil t)
-          (let ((start (point)))
-            (forward-line)
-            (let ((content (buffer-substring-no-properties (point) (point-max))))
-              (with-current-buffer scratchpad-buffer-name
-                (insert content)))))))))
+    (when (file-exists-p scratchpad-current-file)
+      (insert-file-contents scratchpad-current-file))))
 
 (defun scratchpad-save-buffer ()
-  "Save the contents of '*scratch*' buffer to `scratchpad-current-backup-file` so that it can be restored later."
+  "Save the contents of '*scratch*' buffer.
+
+Contents are stored to `scratchpad-current-file`."
   (interactive)
   (with-current-buffer scratchpad-buffer-name
-    (write-region (point-min) (point-max) scratchpad-current-backup-file)))
+    (write-region (point-min) (point-max) scratchpad-current-file)))
 
 (defun scratchpad-archive-buffer ()
-  "Save the contents of '*scratch*' buffer to a new file with a timestamp heading."
+  "Archive the current scratchpad contents to a dated file.
+Records both creation and archive timestamps in an Org PROPERTIES drawer."
   (interactive)
-  (let* ((timestamp (format-time-string "%Y-%m-%d %I:%M %p"))
+  (let* ((scratch-content (with-current-buffer scratchpad-buffer-name
+                           (buffer-string)))
+         (created-ts (or (ignore-errors
+                             (date-to-time
+                              (string-trim
+                               (with-temp-buffer
+                                 (insert-file-contents scratchpad-current-metadata-file)
+                                 (buffer-string)))))
+                           (current-time)))
          (archive-file (expand-file-name
-                       (format-time-string scratchpad-archive-filename-format)
-                       scratchpad-save-directory))
-         (content (with-current-buffer scratchpad-buffer-name
-                   (buffer-string))))
-    (when (and scratchpad-buffer-name (not (string-empty-p content)))
+                        (format-time-string scratchpad-archive-filename-format created-ts) scratchpad-save-directory))
+         (archived-ts (current-time)))
+    (when (and scratch-content (not (string-empty-p scratch-content)))
       (with-temp-buffer
-        (insert (concat "* " timestamp "\n" content "\n"))
-        (append-to-file (point-min) (point-max) archive-file)))))
+        ;; Org heading
+        (insert (format "* %s\n" (format-time-string "%I:%M %p" created-ts)))
+        ;; Properties drawer
+        (insert ":PROPERTIES:\n")
+        (insert (format ":CREATED_AT: %s\n" (format-time-string "<%Y-%m-%d %I:%M %p>" created-ts)))
+        (insert (format ":ARCHIVED_AT: %s\n" (format-time-string "<%Y-%m-%d %I:%M %p>" archived-ts)))
+        (insert ":END:\n\n")
+        ;; Content
+        (insert scratch-content "\n\n")
+        ;; Append to archive file
+        (append-to-file (point-min) (point-max) archive-file))
+      (message "Archived scratchpad to %s" archive-file))))
 
 (defun scratchpad-toggle-new ()
-  "Start a new scratchpad. This will save and then wipe the `*scratch*' buffer."
+  "Start a new scratchpad.
+
+This will save and then wipe the `*scratch*' buffer,
+and record *now* as the creation time."
   (interactive)
+  ;; 1) Archive and wipe
   (with-current-buffer scratchpad-buffer-name
     (scratchpad-archive-buffer)
-    (erase-buffer)))
+    (erase-buffer))
+  ;; 2) Record the creation timestamp
+  (unless (file-exists-p scratchpad-save-directory)
+    (make-directory scratchpad-save-directory t))
+  (with-temp-file scratchpad-current-metadata-file
+    (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))))
+  (message "Scratchpad reset; new scratch session starts now."))
 
 (transient-define-prefix scratchpad-menu ()
   "Scratchpad menu."
@@ -159,26 +209,27 @@ otherwise, defaults to `lisp-interaction-mode'."
    ("n" "New scratchpad" scratchpad-toggle-new)
    ("." "Quit" transient-quit-one)])
 
-(defun scratchpad-help ()
+(defun scratchpad-menu-open ()
   "Show the scratchpad help menu."
   (interactive)
   (scratchpad-menu))
 
-(defvar scratchpad-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd scratchpad-menu-key) #'scratchpad-help)
-    map)
-  "Keymap for `scratchpad-mode'.")
+(defun scratchpad-save-before-exit ()
+  "Conditionally save the scratchpad buffer before exiting Emacs."
+  (when (and scratchpad-autosave-on-exit
+             (get-buffer scratchpad-buffer-name))
+    (scratchpad-save-buffer)))
 
-(define-minor-mode scratchpad-mode
-  "Minor mode for scratchpad functionality.
-When enabled, provides keybindings and functionality for scratchpad operations."
-  :lighter " Scratch"
-  :keymap scratchpad-mode-map
-  :group 'scratchpad)
+(defun scratchpad--autosave-on-focus-change ()
+  "Auto-save scratchpad buffer when Emacs frame loses focus."
+  (when (and scratchpad-autosave-on-focus-change
+             (get-buffer scratchpad-buffer-name))
+    (scratchpad-save-buffer)))
 
-(provide 'scratchpad)
+(add-hook 'kill-emacs-hook #'scratchpad-save-before-exit)
+(add-hook 'focus-out-hook #'scratchpad--autosave-on-focus-change)
+(run-with-timer 0 scratchpad-autosave-interval #'scratchpad-save-buffer)
 (scratchpad-initialize)
 
-(run-with-timer 0 scratchpad-autosave-interval #'scratchpad-save-buffer)
+(provide 'scratchpad)
 ;;; scratchpad.el ends here
