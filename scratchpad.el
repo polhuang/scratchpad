@@ -1,4 +1,4 @@
-scr;;; scratchpad.el --- Use the scratch buffer as a capture and edit space  -*- lexical-binding: t -*-
+;;; scratchpad.el --- Use the scratch buffer as a capture and edit space  -*- lexical-binding: t -*-
 
 ;; Copyright (c) 2023-2024 Paul Huang
 ;;
