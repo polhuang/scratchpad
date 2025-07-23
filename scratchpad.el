@@ -41,6 +41,12 @@
   :type 'directory
   :group 'scratchpad)
 
+(defcustom scratchpad-file-assoc-directory
+  (expand-file-name "file-associated" scratchpad-save-directory)
+  "Directory where file-associated scratchpad files are stored."
+  :type 'directory
+  :group 'scratchpad)
+
 (defcustom scratchpad-current-file
   (expand-file-name "current-scratch.org" scratchpad-save-directory)
   "Current file storing scratchpad contents."
@@ -105,6 +111,8 @@ otherwise, defaults to `lisp-interaction-mode'."
   (setq initial-scratch-message nil)
   (unless (file-exists-p scratchpad-save-directory)
     (make-directory scratchpad-save-directory t))
+  (unless (file-exists-p scratchpad-file-assoc-directory)
+    (make-directory scratchpad-file-assoc-directory t))
   (unless (file-exists-p scratchpad-current-metadata-file)
     (with-temp-file scratchpad-current-metadata-file
       (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))))
