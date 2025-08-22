@@ -43,7 +43,9 @@
 
 (defcustom scratchpad-file-assoc-directory
   (expand-file-name "file-associated" scratchpad-save-directory)
-  "Directory where file-associated scratchpad files are stored."
+  "Directory where file-associated scratchpad files are stored.
+By default this is the \"file-associated\" subfolder of
+`scratchpad-save-directory`."
   :type 'directory
   :group 'scratchpad)
 
@@ -61,6 +63,18 @@
   
 (defcustom scratchpad-archive-filename-format "%Y-%m-%d.org"
   "Format of backup file names, for `format-time-string'."
+  :type 'string
+  :group 'scratchpad)
+
+(defcustom scratchpad-file-assoc-filename-format "%s.org"
+  "Format string for file-associated scratchpad filenames.
+
+It receives one argument: a sanitized absolute path of the source file.
+The result is joined under `scratchpad-file-assoc-directory`.
+
+Example:
+  visiting /home/pol/Documents/example.org
+  → scratchpad/file-associated/__home__pol__Documents__example.org.org"
   :type 'string
   :group 'scratchpad)
 
@@ -101,6 +115,23 @@ otherwise, defaults to `lisp-interaction-mode'."
 
 (define-derived-mode scratchpad-mode org-mode "scratch"
   "Special mode for scratchpad buffers.")
+
+;;
+;;; Utilities
+
+(defun scratchpad--ensure-dir (dir)
+  "Ensure DIR exists and return it."
+  (unless (file-directory-p dir)
+    (make-directory dir t))
+  dir)
+
+(defun scratchpad--sanitize-path-for-filename (path)
+  "Turn PATH into a filesystem-safe single filename.
+Preserves enough of the original path for easy association."
+  (let* ((abs (expand-file-name path))
+         (safe (replace-regexp-in-string
+                "[/\\\\:*?\"<>|]" "__" abs)))
+    (replace-regexp-in-string "__+" "__" safe)))
 
 ;;
 ;;; Functions
