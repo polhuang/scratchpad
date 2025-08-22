@@ -140,7 +140,11 @@ Preserves enough of the original path for easy association."
     (replace-regexp-in-string "__+" "__" safe)))
 
 (defun scratchpad--find-buffer-by-associated-file (file)
-  "Return an open scratchpad buffer whose `scratchpad-associated-file' is FILE, or nil."
+  "Return an open scratchpad buffer whose associated file matches FILE.
+
+The association is checked against the buffer-local variable
+`scratchpad-associated-file'.  If no matching buffer is found,
+return nil."
   (let ((abs (expand-file-name file)))
     (seq-find
      (lambda (buf)
