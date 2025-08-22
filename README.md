@@ -1,8 +1,8 @@
 # scratchpad.el
 
-A persistent scratchpad system for Emacs with auto-save and per-file scratchpads.
+An improved scratch buffer for Emacs with auto-save and per-file scratchpads.
 
-Unlike the default `*scratch*` buffer, which disappears or resets on restart, `scratchpad.el` automatically persists your scratch notes to disk. It also supports per-file scratchpads, giving every file you visit its own notes buffer.
+Unlike the default `*scratch*` buffer, which disappears or resets on restart, `scratchpad.el` automatically persists your scratch notes to disk. It also supports file-specific scratch buffers, giving you a dedicated place to jot down notes associated with each file.
 
 ---
 
