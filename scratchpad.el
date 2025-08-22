@@ -117,6 +117,12 @@ otherwise, defaults to `lisp-interaction-mode'."
   "Special mode for scratchpad buffers.")
 
 ;;
+;;; Buffer-local state
+
+(defvar-local scratchpad-associated-file nil
+  "If non-nil, path to the backing file for this scratchpad buffer.")
+
+;;
 ;;; Utilities
 
 (defun scratchpad--ensure-dir (dir)
@@ -133,9 +139,27 @@ Preserves enough of the original path for easy association."
                 "[/\\\\:*?\"<>|]" "__" abs)))
     (replace-regexp-in-string "__+" "__" safe)))
 
+(defun scratchpad--find-buffer-by-associated-file (file)
+  "Return an open scratchpad buffer whose `scratchpad-associated-file' is FILE, or nil."
+  (let ((abs (expand-file-name file)))
+    (seq-find
+     (lambda (buf)
+       (with-current-buffer buf
+         (and (derived-mode-p 'scratchpad-mode)
+              (string= (expand-file-name (or scratchpad-associated-file "")) abs))))
+     (buffer-list))))
+
+(defun scratchpad--make-buffer-name (src)
+  "Return a buffer name for SRC: *scratch* [basename — parent]."
+  (let* ((base   (file-name-nondirectory src))
+         (parent (file-name-nondirectory
+                  (directory-file-name (file-name-directory src)))))
+    (generate-new-buffer-name
+     (format "*scratch* [%s — %s]" base parent))))
+
 ;;
 ;;; File-associated scratchpads
-
+;;;###autoload
 (defun scratchpad-file-associated-path (&optional file)
   "Return the per-file scratchpad path for FILE (or current buffer's file)."
   (let* ((src (or file
@@ -146,40 +170,62 @@ Preserves enough of the original path for easy association."
     (expand-file-name (format scratchpad-file-assoc-filename-format safe) dir)))
 
 ;;;###autoload
-(defun scratchpad-open-for-current-file (&optional other-window)
-  "Open (or create) a scratchpad associated with the current file.
-With prefix argument OTHER-WINDOW, open in another window."
-  (interactive "P")
+(defun scratchpad-open-for-current-file ()
+  "Open (or create) a scratchpad buffer associated with the current file.
+
+Always opens in another window.
+
+Creates a buffer named \"*scratch* [<basename>]\", inserts the contents
+of the associated scratchpad file (if any), and enables `scratchpad-mode`.
+The buffer does not visit any file; saving is handled by scratchpad APIs."
+  (interactive)
   (let* ((src (or (buffer-file-name)
                   (user-error "Current buffer is not visiting a file")))
          (dest (scratchpad-file-associated-path src))
-         (newp (not (file-exists-p dest))))
-    (scratchpad--ensure-dir (file-name-directory dest))
-    (if other-window
-        (find-file-other-window dest)
-      (find-file dest))
-    (when newp
-      (when (derived-mode-p 'org-mode)
-        (insert (format "#+TITLE: Scratch for %s\n\n" src))))
-    (unless (eq major-mode scratchpad-major-mode-initial)
-      (funcall scratchpad-major-mode-initial))
-    (scratchpad-mode)
+         (existing (scratchpad--find-buffer-by-associated-file dest))
+         (buf (or existing (get-buffer-create (scratchpad--make-buffer-name src))))
+         (newp (and (not (file-exists-p dest)) (null existing))))
+    (with-current-buffer buf
+      (unless existing
+        (erase-buffer)
+        (when (file-exists-p dest) (insert-file-contents dest))
+        (when newp (insert (format "#+TITLE: Scratch for %s\n\n" src)))
+        (unless (eq major-mode scratchpad-major-mode-initial)
+          (funcall scratchpad-major-mode-initial))
+        (scratchpad-mode)
+        (setq-local scratchpad-associated-file dest)))
+    (switch-to-buffer-other-window buf)
     (message "Scratchpad for file: %s" dest)))
 
 ;;;###autoload
 (defun scratchpad-open-for-file (file &optional other-window)
-  "Open (or create) a scratchpad associated with FILE.
-With OTHER-WINDOW non-nil, open in another window."
+  "Open (or create) a scratchpad buffer associated with FILE.
+With OTHER-WINDOW non-nil, open in another window.
+
+Creates a buffer named \"*scratch* [<basename>]\", inserts the current contents
+of the associated backing file (if it exists), and enables `scratchpad-mode`.
+The buffer does not visit any file; saving is handled by scratchpad APIs."
   (interactive "fFile: \nP")
-  (let ((dest (scratchpad-file-associated-path file)))
+  (let* ((dest (scratchpad-file-associated-path file))
+         (bufname (scratchpad--make-buffer-name file))
+         (newp (not (file-exists-p dest)))
+         (buf (get-buffer-create bufname)))
     (scratchpad--ensure-dir (file-name-directory dest))
+    (with-current-buffer buf
+      (erase-buffer)
+      (when (file-exists-p dest)
+        (insert-file-contents dest))
+      (when (and newp (fboundp 'org-mode))
+        (insert (format "#+TITLE: Scratch for %s\n\n" file)))
+      (unless (eq major-mode scratchpad-major-mode-initial)
+        (funcall scratchpad-major-mode-initial))
+      (scratchpad-mode)
+      (setq-local scratchpad-associated-file dest))
     (if other-window
-        (find-file-other-window dest)
-      (find-file dest))
-    (unless (eq major-mode scratchpad-major-mode-initial)
-      (funcall scratchpad-major-mode-initial))
-    (scratchpad-mode)
+        (switch-to-buffer-other-window buf)
+      (switch-to-buffer buf))
     (message "Scratchpad for file: %s" dest)))
+
 
 ;;
 ;;; Core scratchpad functions
@@ -226,6 +272,7 @@ With OTHER-WINDOW non-nil, open in another window."
   (interactive)
   (switch-to-buffer-other-window (get-buffer-create scratchpad-buffer-name)))
 
+;;;###autoload
 (defun scratchpad-restore-contents ()
   "Restore all contents from the scratchpad backup file."
   (interactive)
@@ -234,14 +281,61 @@ With OTHER-WINDOW non-nil, open in another window."
     (when (file-exists-p scratchpad-current-file)
       (insert-file-contents scratchpad-current-file))))
 
-(defun scratchpad-save-buffer ()
-  "Save the contents of '*scratch*' buffer.
+;;;###autoload
+(defun scratchpad-save-buffer (&optional buffer)
+  "Save a scratchpad BUFFER to its backing file.
 
-Contents are stored to `scratchpad-current-file`."
+If BUFFER is non-nil, save that buffer.  
+If BUFFER is nil, save the current buffer.
+
+- For file-associated scratchpads, saves to their buffer-local
+  `scratchpad-associated-file`.
+- For the main `*scratch*` buffer, saves to `scratchpad-current-file`."
   (interactive)
-  (with-current-buffer scratchpad-buffer-name
-    (write-region (point-min) (point-max) scratchpad-current-file)))
+  (let ((buf (or buffer (current-buffer))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'scratchpad-mode)
+        (user-error "Not in a scratchpad buffer: %s" (buffer-name buf)))
+      (let ((dest (or scratchpad-associated-file
+                      (and (string= (buffer-name buf) scratchpad-buffer-name)
+                           scratchpad-current-file))))
+        (unless dest
+          (user-error "No associated backing file for this scratchpad: %s"
+                      (buffer-name buf)))
+        (save-restriction
+          (widen)
+          (write-region (point-min) (point-max) dest))
+        (when (string= (buffer-name buf) scratchpad-buffer-name)
+          ;; keep metadata for main scratch
+          (unless (file-exists-p scratchpad-current-metadata-file)
+            (with-temp-file scratchpad-current-metadata-file
+              (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))))))
+        (message "Scratchpad saved: %s" dest)))))
 
+
+;;;###autoload
+(defun scratchpad-save-all-buffers ()
+  "Save all open scratchpad buffers (global and file-associated).
+Returns the number of buffers saved."
+  (interactive)
+  (let ((count 0))
+    (dolist (buf (buffer-list))
+      (when (buffer-live-p buf)
+        (with-current-buffer buf
+          (when (derived-mode-p 'scratchpad-mode)
+            (condition-case err
+                (progn
+                  (scratchpad-save-buffer buf)
+                  (setq count (1+ count)))
+              (error
+               (message "scratchpad: failed to save %s: %s"
+                        (buffer-name buf) err)))))))
+    (when (called-interactively-p 'interactive)
+      (message "Saved %d scratchpad buffer%s"
+               count (if (= count 1) "" "s")))
+    count))
+
+;;;###autoload
 (defun scratchpad-archive-buffer ()
   "Archive the current scratchpad contents to a dated file.
 Records both creation and archive timestamps in an Org PROPERTIES drawer."
@@ -273,6 +367,7 @@ Records both creation and archive timestamps in an Org PROPERTIES drawer."
         (append-to-file (point-min) (point-max) archive-file))
       (message "Archived scratchpad to %s" archive-file))))
 
+;;;###autoload
 (defun scratchpad-toggle-new ()
   "Start a new scratchpad.
 
@@ -296,6 +391,7 @@ and record *now* as the creation time."
    ("n" "New scratchpad" scratchpad-toggle-new)
    ("." "Quit" transient-quit-one)])
 
+;;;###autoload
 (defun scratchpad-menu-open ()
   "Show the scratchpad help menu."
   (interactive)
@@ -305,13 +401,13 @@ and record *now* as the creation time."
   "Conditionally save the scratchpad buffer before exiting Emacs."
   (when (and scratchpad-autosave-on-exit
              (get-buffer scratchpad-buffer-name))
-    (scratchpad-save-buffer)))
+    (scratchpad-save-all-buffers)))
 
 (defun scratchpad--autosave-on-focus-change ()
   "Auto-save scratchpad buffer when Emacs frame loses focus."
   (when (and scratchpad-autosave-on-focus-change
              (get-buffer scratchpad-buffer-name))
-    (scratchpad-save-buffer)))
+    (scratchpad-save-all-buffers)))
 
 (add-hook 'kill-emacs-hook #'scratchpad-save-before-exit)
 (add-hook 'focus-out-hook #'scratchpad--autosave-on-focus-change)
