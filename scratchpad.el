@@ -415,7 +415,7 @@ and record *now* as the creation time."
 
 (add-hook 'kill-emacs-hook #'scratchpad-save-before-exit)
 (add-hook 'focus-out-hook #'scratchpad--autosave-on-focus-change)
-(run-with-timer 0 scratchpad-autosave-interval #'scratchpad-save-buffer)
+(run-with-timer 0 scratchpad-autosave-interval #'scratchpad-save-all-buffers)
 (scratchpad-initialize)
 
 (provide 'scratchpad)
