@@ -150,12 +150,12 @@ Preserves enough of the original path for easy association."
      (buffer-list))))
 
 (defun scratchpad--make-buffer-name (src)
-  "Return a buffer name for SRC: *scratch* [basename — parent]."
+  "Return a buffer name for SRC: *scratch* [basename - parent]."
   (let* ((base   (file-name-nondirectory src))
          (parent (file-name-nondirectory
                   (directory-file-name (file-name-directory src)))))
     (generate-new-buffer-name
-     (format "*scratch* [%s — %s]" base parent))))
+     (format "*scratch* [%s - %s]" base parent))))
 
 ;;
 ;;; File-associated scratchpads
