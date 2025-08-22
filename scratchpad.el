@@ -400,26 +400,103 @@ Records both creation and archive timestamps in a PROPERTIES drawer."
 
 ;;;###autoload
 (defun scratchpad-menu-open ()
-  "Show the scratchpad help menu."
+  "Show the scratchpad menu."
   (interactive)
   (scratchpad-menu))
 
+;;;; Transient menu helpers
+
+(defun scratchpad-toggle-autosave-on-exit ()
+  "Toggle whether scratch buffers are saved on Emacs exit."
+  (interactive)
+  (setq scratchpad-autosave-on-exit (not scratchpad-autosave-on-exit))
+  (message "scratchpad: save on exit %s"
+           (if scratchpad-autosave-on-exit "ENABLED" "DISABLED")))
+
+(defun scratchpad-toggle-autosave-on-focus-change ()
+  "Toggle whether scratch buffers are saved when Emacs loses focus."
+  (interactive)
+  (setq scratchpad-autosave-on-focus-change (not scratchpad-autosave-on-focus-change))
+  (message "scratchpad: save on focus change %s"
+           (if scratchpad-autosave-on-focus-change "ENABLED" "DISABLED")))
+
+(defun scratchpad-set-autosave-interval (seconds)
+  "Set autosave interval for scratch buffers to SECONDS and restart the timer."
+  (interactive "nAutosave interval (seconds): ")
+  (setq scratchpad-autosave-interval seconds)
+  (when (timerp scratchpad--autosave-timer)
+    (cancel-timer scratchpad--autosave-timer)
+    (setq scratchpad--autosave-timer
+          (run-with-timer 0 scratchpad-autosave-interval
+                          #'scratchpad-save-all-buffers)))
+  (message "scratchpad: autosave interval set to %s seconds" seconds))
+
+;;;; Transient menu
+
+(transient-define-prefix scratchpad-menu ()
+  "Scratchpad menu."
+  [
+   ;; Column 1: Global scratch
+   ["Global scratch buffer"
+    ("n" "New scratch buffer"                   scratchpad-toggle-new)
+    ]
+
+   ["Save scratch buffer"
+    ("s" "Save current scratch buffer"          scratchpad-save-buffer)
+    ("S" "Save ALL scratch buffers"             scratchpad-save-all-buffers)]
+   
+   ;; Column 2: File-linked scratchpads
+   ["Open scratch buffer"
+    ("f" "Open scratchpad for current file"     scratchpad-open-for-current-file)
+    ("F" "Open for file…"                       scratchpad-open-for-file)]
+
+   ;; Column 3: Help
+   ["Essential commands"
+    ("." "Quit"                                 transient-quit-one)]
+   ])
+
+;;;###autoload
+(defun scratchpad-menu-open ()
+  "Show the scratchpad menu."
+  (interactive)
+  (scratchpad-menu))
+
+;;
+;;; Lifecycle (opt-in)
+
 (defun scratchpad-save-before-exit ()
-  "Conditionally save the scratchpad buffer before exiting Emacs."
+  "Save scratch buffers before exiting Emacs, if enabled."
   (when (and scratchpad-autosave-on-exit
              (get-buffer scratchpad-buffer-name))
     (scratchpad-save-all-buffers)))
 
 (defun scratchpad--autosave-on-focus-change ()
-  "Auto-save scratchpad buffer when Emacs frame loses focus."
+  "Auto-save scratch buffers when Emacs frame loses focus."
   (when (and scratchpad-autosave-on-focus-change
              (get-buffer scratchpad-buffer-name))
     (scratchpad-save-all-buffers)))
 
-(add-hook 'kill-emacs-hook #'scratchpad-save-before-exit)
-(add-hook 'focus-out-hook #'scratchpad--autosave-on-focus-change)
-(run-with-timer 0 scratchpad-autosave-interval #'scratchpad-save-all-buffers)
-(scratchpad-initialize)
+;;;###autoload
+(defun scratchpad-enable ()
+  "Enable Scratchpad autosave and hooks; also initialize the main buffer."
+  (interactive)
+  (add-hook 'kill-emacs-hook #'scratchpad-save-before-exit)
+  (add-hook 'focus-out-hook #'scratchpad--autosave-on-focus-change)
+  (unless (timerp scratchpad--autosave-timer)
+    (setq scratchpad--autosave-timer
+          (run-with-timer 0 scratchpad-autosave-interval
+                          #'scratchpad-save-all-buffers)))
+  (scratchpad-initialize))
+
+;;;###autoload
+(defun scratchpad-disable ()
+  "Disable Scratchpad autosave and hooks; cancel timers."
+  (interactive)
+  (remove-hook 'kill-emacs-hook #'scratchpad-save-before-exit)
+  (remove-hook 'focus-out-hook #'scratchpad--autosave-on-focus-change)
+  (when (timerp scratchpad--autosave-timer)
+    (cancel-timer scratchpad--autosave-timer)
+    (setq scratchpad--autosave-timer nil)))
 
 (provide 'scratchpad)
 ;;; scratchpad.el ends here
