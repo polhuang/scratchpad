@@ -134,7 +134,55 @@ Preserves enough of the original path for easy association."
     (replace-regexp-in-string "__+" "__" safe)))
 
 ;;
-;;; Functions
+;;; File-associated scratchpads
+
+(defun scratchpad-file-associated-path (&optional file)
+  "Return the per-file scratchpad path for FILE (or current buffer's file)."
+  (let* ((src (or file
+                  (buffer-file-name)
+                  (user-error "Current buffer is not visiting a file")))
+         (safe (scratchpad--sanitize-path-for-filename (expand-file-name src)))
+         (dir  (scratchpad--ensure-dir scratchpad-file-assoc-directory)))
+    (expand-file-name (format scratchpad-file-assoc-filename-format safe) dir)))
+
+;;;###autoload
+(defun scratchpad-open-for-current-file (&optional other-window)
+  "Open (or create) a scratchpad associated with the current file.
+With prefix argument OTHER-WINDOW, open in another window."
+  (interactive "P")
+  (let* ((src (or (buffer-file-name)
+                  (user-error "Current buffer is not visiting a file")))
+         (dest (scratchpad-file-associated-path src))
+         (newp (not (file-exists-p dest))))
+    (scratchpad--ensure-dir (file-name-directory dest))
+    (if other-window
+        (find-file-other-window dest)
+      (find-file dest))
+    (when newp
+      (when (derived-mode-p 'org-mode)
+        (insert (format "#+TITLE: Scratch for %s\n\n" src))))
+    (unless (eq major-mode scratchpad-major-mode-initial)
+      (funcall scratchpad-major-mode-initial))
+    (scratchpad-mode)
+    (message "Scratchpad for file: %s" dest)))
+
+;;;###autoload
+(defun scratchpad-open-for-file (file &optional other-window)
+  "Open (or create) a scratchpad associated with FILE.
+With OTHER-WINDOW non-nil, open in another window."
+  (interactive "fFile: \nP")
+  (let ((dest (scratchpad-file-associated-path file)))
+    (scratchpad--ensure-dir (file-name-directory dest))
+    (if other-window
+        (find-file-other-window dest)
+      (find-file dest))
+    (unless (eq major-mode scratchpad-major-mode-initial)
+      (funcall scratchpad-major-mode-initial))
+    (scratchpad-mode)
+    (message "Scratchpad for file: %s" dest)))
+
+;;
+;;; Core scratchpad functions
 
 ;;;###autoload
 (defun scratchpad-initialize ()
