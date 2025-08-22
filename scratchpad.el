@@ -1,26 +1,41 @@
-;;; scratchpad.el --- Use the scratch buffer as a capture and edit space  -*- lexical-binding: t -*-
+;;; scratchpad.el --- Use the scratch buffer as a capture and edit space  -*- lexical-binding: t; -*-
 
-;; Copyright (c) 2023-2024 Paul Huang
+;; Copyright (c) 2023-2025 Paul Huang
 ;;
-;; Author     : Paul Huang <paulleehuang@proton.me>
-;; URL        : https://github.com/polhuang/scratchpad
+;; Author: Paul Huang <paulleehuang@protonmail.com>
+;; URL: https://github.com/polhuang/scratchpad
 ;;
 ;; This file is not part of GNU Emacs.
 ;;
-;;; License: GPLv3
-;;
 ;; Created: December 31, 2023
-;; Package-Version: 0.0.0
-;; Keywords: scratch, capture, notes, note-taking, tools, buffer
-;; Package-Requires: ((Emacs "26.1"))
-;;; Commentary:
+;; Keywords: scratch, capture, notes, note-taking, tools, buffer, convenience
+;; Package-Requires: ((emacs "26.1") (transient "0.3.7"))
+;; SPDX-License-Identifier: GPL-3.0-or-later
 
-;; A persistent scratchpad with auto-save capabilities
+;;; Commentary:
+;;
+;; Enhanced scratch buffer within Emacs. This package provides
+;; a persistent scratch buffer with autosave and archiving capabilities.
+;; It also supports creating scratch buffers linked to individual files,
+;; giving you a dedicated place to jot down notes associated with each file.
+;;
+;; Quick start:
+;;   (require 'scratchpad)
+;;   (scratchpad-enable)
+;;
+;; Useful commands:
+;;   M-x scratchpad-toggle         ; pop open/close the main *scratch* window
+;;   M-x scratchpad-toggle-new     ; archive current, start a fresh scratch
+;;   M-x scratchpad-open-for-current-file ; per-file scratch buffer
+;;   M-x scratchpad-save-all-buffers      ; save all scratch buffers to disk
+;;
+;; Customize via `M-x customize-group RET scratchpad RET`.
 
 ;;; Code:
 
-(require 'recentf)
 (require 'transient)
+(require 'seq)
+(require 'subr-x)
 
 ;;
 ;;; Customization
