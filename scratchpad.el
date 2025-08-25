@@ -481,11 +481,31 @@ Records both creation and archive timestamps in a PROPERTIES drawer."
     (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))))
   (message "Scratchpad reset; new scratch session starts now."))
 
-(transient-define-prefix scratchpad-menu ()
-  "Scratchpad menu."
-  ["Actions"
-   ("n" "New scratchpad" scratchpad-toggle-new)
-   ("." "Quit" transient-quit-one)])
+;;;###autoload
+(defun scratchpad-open-by-date (date &optional other-window)
+  "Open an archived scratchpad by DATE.
+
+DATE should be a string in the format used by
+`scratchpad-archive-filename-format` (default: YYYY-MM-DD).
+
+With OTHER-WINDOW non-nil, open in another window."
+  (interactive
+   (list (completing-read
+          "Open archived scratchpad (date): "
+          (directory-files scratchpad-save-directory nil "^[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\.org$")
+          nil t)
+         current-prefix-arg))
+  (let* ((archive-file (expand-file-name date scratchpad-save-directory))
+         (bufname (format "*scratch-archive* [%s]" date))
+         (buf (get-buffer-create bufname)))
+    (with-current-buffer buf
+      (erase-buffer)
+      (insert-file-contents archive-file)
+      (scratchpad-mode))
+    (if other-window
+        (switch-to-buffer-other-window buf)
+      (switch-to-buffer buf))
+    (message "Opened archived scratchpad: %s" archive-file)))
 
 ;;;###autoload
 (defun scratchpad-menu-open ()
@@ -525,30 +545,27 @@ Records both creation and archive timestamps in a PROPERTIES drawer."
 (transient-define-prefix scratchpad-menu ()
   "Scratchpad menu."
   [
-   ;; Column 1: Global scratch
    ["Global scratch buffer"
-    ("n" "New scratch buffer"                   scratchpad-toggle-new)
-    ]
-
+    ("n" "New scratch buffer"                   scratchpad-toggle-new)]
    ["Save scratch buffer"
     ("s" "Save current scratch buffer"          scratchpad-save-buffer)
     ("S" "Save ALL scratch buffers"             scratchpad-save-all-buffers)]
-   
-   ;; Column 2: File-linked scratchpads
    ["Open scratch buffer"
+    ("d" "Open scratchpad by date"              scratchpad-open-by-date)
     ("f" "Open scratchpad for current file"     scratchpad-open-for-current-file)
     ("F" "Open for file…"                       scratchpad-open-for-file)]
-
-   ;; Column 3: Help
-   ["Essential commands"
+   ["Named scratch buffers"
+    ("c" "Create/open named buffer"             scratchpad-create-named)
+    ("o" "Open existing named buffer"           scratchpad-open-named)
+    ("l" "List named buffers"                   scratchpad-list-named)]
+   ["Toggles"
+    ("x" "Toggle save on exit"                  scratchpad-toggle-autosave-on-exit)
+    ("X" "Toggle save on focus change"          scratchpad-toggle-autosave-on-focus-change)]
+   ["Settings"
+    ("i" "Set autosave interval"                scratchpad-set-autosave-interval)]
+   ["Help"
     ("." "Quit"                                 transient-quit-one)]
    ])
-
-;;;###autoload
-(defun scratchpad-menu-open ()
-  "Show the scratchpad menu."
-  (interactive)
-  (scratchpad-menu))
 
 ;;
 ;;; Lifecycle (opt-in)
