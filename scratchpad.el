@@ -152,6 +152,7 @@ Example:
     (define-key map (kbd "C-c .") #'scratchpad-menu-open)
     (define-key map (kbd "C-c C-s") #'scratchpad-save-buffer)
     (define-key map (kbd "C-c C-a") #'scratchpad-archive-buffer)
+    (define-key map (kbd "C-c M-a") #'scratchpad-archive-named-buffer)
     (define-key map (kbd "C-c C-n") #'scratchpad-toggle-new)
     map)
   "Keymap for `scratchpad-mode'.")
@@ -239,10 +240,14 @@ With OTHER-WINDOW non-nil, open in another window."
     (with-current-buffer buf
       (unless existing
         (erase-buffer)
-        (when (file-exists-p dest) (insert-file-contents dest))
         (when newp
           (with-temp-file dest
             (insert (format "#+TITLE: %s\n\n" name))))
+        (when (file-exists-p dest)
+          (insert-file-contents dest)
+          (goto-char (point-min))
+          (when (looking-at "^#\\+TITLE:.*\n\\(?:\n\\)?")
+            (delete-region (match-beginning 0) (match-end 0))))
         (scratchpad-mode)
         (setq-local scratchpad-associated-file dest)
         (setq-local scratchpad-buffer-name-local name)))
@@ -475,6 +480,35 @@ Records both creation and archive timestamps in a PROPERTIES drawer."
       (message "Archived scratchpad to %s" archive-file))))
 
 ;;;###autoload
+(defun scratchpad-archive-named-buffer ()
+  "Archive the current named scratchpad buffer to a dated Org file.
+
+Records both creation and archive timestamps in a PROPERTIES drawer."
+  (interactive)
+  (unless (and (derived-mode-p 'scratchpad-mode) scratchpad-buffer-name-local)
+    (user-error "Not in a named scratchpad buffer"))
+  (let* ((buffer-content (buffer-string))
+         (name scratchpad-buffer-name-local)
+         (file-path scratchpad-associated-file)
+         (created-ts (or (ignore-errors
+                           (nth 5 (file-attributes file-path)))
+                         (current-time)))
+         (archive-file (expand-file-name
+                        (format-time-string scratchpad-archive-filename-format created-ts)
+                        scratchpad-save-directory))
+         (archived-ts (current-time)))
+    (when (and buffer-content (not (string-empty-p buffer-content)))
+      (with-temp-buffer
+        (insert (format "* %s\n" (format-time-string "%I:%M %p" created-ts)))
+        (insert ":PROPERTIES:\n")
+        (insert (format ":CREATED_AT: %s\n" (format-time-string "<%Y-%m-%d %I:%M %p>" created-ts)))
+        (insert (format ":ARCHIVED_AT: %s\n" (format-time-string "<%Y-%m-%d %I:%M %p>" archived-ts)))
+        (insert ":END:\n\n")
+        (insert buffer-content "\n\n")
+        (append-to-file (point-min) (point-max) archive-file))
+      (message "Archived named scratchpad '%s' to %s" name archive-file))))
+
+;;;###autoload
 (defun scratchpad-toggle-new ()
   "Archive and wipe the main scratchpad, then start a new one."
   (interactive)
@@ -562,7 +596,8 @@ With OTHER-WINDOW non-nil, open in another window."
    ["Named scratch buffers"
     ("c" "Create/open named buffer"             scratchpad-create-named)
     ("o" "Open existing named buffer"           scratchpad-open-named)
-    ("l" "List named buffers"                   scratchpad-list-named)]
+    ("l" "List named buffers"                   scratchpad-list-named)
+    ("a" "Archive named buffer"                 scratchpad-archive-named-buffer)]
    ["Toggles"
     ("x" "Toggle save on exit"                  scratchpad-toggle-autosave-on-exit)
     ("X" "Toggle save on focus change"          scratchpad-toggle-autosave-on-focus-change)]
