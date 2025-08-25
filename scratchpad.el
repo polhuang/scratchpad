@@ -149,7 +149,10 @@ Example:
 
 (defvar scratchpad-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c s") #'scratchpad-menu-open)
+    (define-key map (kbd "C-c .") #'scratchpad-menu-open)
+    (define-key map (kbd "C-c C-s") #'scratchpad-save-buffer)
+    (define-key map (kbd "C-c C-a") #'scratchpad-archive-buffer)
+    (define-key map (kbd "C-c C-n") #'scratchpad-toggle-new)
     map)
   "Keymap for `scratchpad-mode'.")
 
@@ -237,7 +240,9 @@ With OTHER-WINDOW non-nil, open in another window."
       (unless existing
         (erase-buffer)
         (when (file-exists-p dest) (insert-file-contents dest))
-        (when newp (insert (format "#+TITLE: %s\n\n" name)))
+        (when newp
+          (with-temp-file dest
+            (insert (format "#+TITLE: %s\n\n" name))))
         (scratchpad-mode)
         (setq-local scratchpad-associated-file dest)
         (setq-local scratchpad-buffer-name-local name)))
@@ -545,7 +550,7 @@ With OTHER-WINDOW non-nil, open in another window."
 (transient-define-prefix scratchpad-menu ()
   "Scratchpad menu."
   [
-   ["Global scratch buffer"
+   ["Main scratch buffer"
     ("n" "New scratch buffer"                   scratchpad-toggle-new)]
    ["Save scratch buffer"
     ("s" "Save current scratch buffer"          scratchpad-save-buffer)
