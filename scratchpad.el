@@ -1,40 +1,52 @@
 ;;; scratchpad.el --- An enhanced scratch buffer with autosave and file-specific notes  -*- lexical-binding: t; -*-
+
 ;; Copyright (c) 2023-2025 Paul Huang
-;;
+
 ;; Author: Paul Huang <paulleehuang@protonmail.com>
-;; URL: https://github.com/polhuang/scratchpad
-;;
-;; This file is not part of GNU Emacs.
-;;
 ;; Created: December 31, 2023
+;; Package-Requires: ((emacs "26.1") (transient "0.3.7") (org "9.0"))
 ;; Keywords: scratch, capture, notes, note-taking
-;; Package-Requires: ((emacs "26.1") (transient "0.3.7"))
+;; URL: https://github.com/polhuang/scratchpad
+
 ;; SPDX-License-Identifier: GPL-3.0-or-later
 
+;; This program is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;; This file is NOT part of GNU Emacs.
+
 ;;; Commentary:
+
+;; scratchpad provides a persistent scratch buffer with autosave, archiving,
+;; and text capturing capabilities. It also supports creating scratch buffers
+;; linked to individual files, giving you a dedicated place to jot down notes
+;; associated with each file.
 ;;
-;; Enhanced scratch buffer within Emacs. This package provides a persistent
-;; scratch buffer with autosave, archiving, and text capturing capabilities.
-;; It also supports creating scratch buffers linked to individual files,
-;; giving you a dedicated place to jot down notes associated with each file.
+;; Features:
+;; - Persistent scratch buffers that automatically save periodically.
+;; - Create and manage scratch buffers associated with specific files.
+;; - Archive scratchpad contents with timestamps to organize past notes.
+;; - Integrated with org-mode for structured note-taking.
+;; - Supports toggling scratch windows and capturing highlighted text into the buffer quickly
 ;;
-;; Quick start:
-;;   (require 'scratchpad)
-;;   (scratchpad-enable)
-;;
-;; Useful commands:
-;;   M-x scratchpad-toggle         ; pop open/close the main *scratch* window
-;;   M-x scratchpad-toggle-new     ; archive current, start a fresh scratch
-;;   M-x scratchpad-open-for-current-file ; per-file scratch buffer
-;;   M-x scratchpad-save-all-buffers      ; save all scratch buffers to disk
-;;
-;; Customize via `M-x customize-group RET scratchpad RET`.
+
 
 ;;; Code:
 
 (require 'transient)
 (require 'seq)
 (require 'subr-x)
+(require 'org)
 
 ;;
 ;;; Customization
