@@ -87,7 +87,7 @@ By default this is the \"named\" subfolder of
 
 (defcustom scratchpad-current-file
   (expand-file-name "current-scratch.org" scratchpad-save-directory)
-  "Backing file for the main scratchpad."
+  "Backing file for the main scratch."
   :type 'file
   :group 'scratchpad)
 
@@ -493,9 +493,7 @@ Records both creation and archive timestamps in a PROPERTIES drawer."
          (created-ts (or (ignore-errors
                            (nth 5 (file-attributes file-path)))
                          (current-time)))
-         (archive-file (expand-file-name
-                        (format-time-string scratchpad-archive-filename-format created-ts)
-                        scratchpad-save-directory))
+         (archive-file file-path)
          (archived-ts (current-time)))
     (when (and buffer-content (not (string-empty-p buffer-content)))
       (with-temp-buffer
