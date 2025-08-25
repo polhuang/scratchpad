@@ -76,6 +76,15 @@ By default this is the \"file-associated\" subfolder of
   :type 'directory
   :group 'scratchpad)
 
+(defcustom scratchpad-named-directory
+  (expand-file-name "named" scratchpad-save-directory)
+  "Directory for named scratchpad files.
+
+By default this is the \"named\" subfolder of
+`scratchpad-save-directory`."
+  :type 'directory
+  :group 'scratchpad)
+
 (defcustom scratchpad-current-file
   (expand-file-name "current-scratch.org" scratchpad-save-directory)
   "Backing file for the main scratchpad."
@@ -105,22 +114,21 @@ Example:
   :type 'string
   :group 'scratchpad)
 
+(defcustom scratchpad-named-filename-format "%s.org"
+  "Format string for named scratch filenames.
+
+It receives one argument: the name of the scratch buffer.
+The result is joined under `scratchpad-named-directory`.
+
+Example:
+  named buffer \"ideas\"
+  → scratchpad/named/ideas.org"
+  :type 'string
+  :group 'scratchpad)
+
 (defcustom scratchpad-autosave-interval 60
   "Interval (seconds) between periodic autosaves of scratch buffers."
   :type 'number
-  :group 'scratchpad)
-
-(defcustom scratchpad-major-mode-initial
-  (if (fboundp 'org-mode) 'org-mode 'lisp-interaction-mode)
-  "Initial major mode for the main scratchpad buffer.
-
-Defaults to `org-mode` if available; otherwise `lisp-interaction-mode`."
-  :type 'function
-  :group 'scratchpad)
-
-(defcustom scratchpad-menu-key "C-c s"
-  "Key binding to open the scratchpad menu in scratch buffers."
-  :type 'string
   :group 'scratchpad)
 
 (defcustom scratchpad-autosave-on-exit t
@@ -141,19 +149,22 @@ Defaults to `org-mode` if available; otherwise `lisp-interaction-mode`."
 
 (defvar scratchpad-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd scratchpad-menu-key) #'scratchpad-menu-open)
+    (define-key map (kbd "C-c s") #'scratchpad-menu-open)
     map)
   "Keymap for `scratchpad-mode'.")
 
 ;;;###autoload
-(define-derived-mode scratchpad-mode text-mode "Scratch"
-  "Special mode for scratchpad buffers.")
+(define-derived-mode scratchpad-mode org-mode "Scratch"
+  "Special mode for scratchpad buffers derived from Org.")
 
 ;;
 ;;; Buffer-local state
 
 (defvar-local scratchpad-associated-file nil
   "If non-nil, path to backing file for this scratchpad buffer.")
+
+(defvar-local scratchpad-buffer-name-local nil
+  "If non-nil, the name of this named scratchpad buffer.")
 
 ;;
 ;;; Utilities
@@ -191,6 +202,81 @@ Checks the buffer-local `scratchpad-associated-file`.  Return nil if none."
      (format "*scratch* [%s - %s]" base parent))))
 
 ;;
+;;; Named scratchpads
+
+(defun scratchpad--find-named-buffer (name)
+  "Return an open named scratchpad buffer with NAME.
+
+Checks the buffer-local `scratchpad-buffer-name-local`.  Return nil if none."
+  (seq-find
+   (lambda (buf)
+     (with-current-buffer buf
+       (and (derived-mode-p 'scratchpad-mode)
+            (string= scratchpad-buffer-name-local name))))
+   (buffer-list)))
+
+(defun scratchpad-named-path (name)
+  "Return the path for named scratchpad buffer NAME."
+  (let ((dir (scratchpad--ensure-dir scratchpad-named-directory)))
+    (expand-file-name (format scratchpad-named-filename-format name) dir)))
+
+;;;###autoload
+(defun scratchpad-create-named (name &optional other-window)
+  "Create or open a named scratchpad buffer with NAME.
+
+With OTHER-WINDOW non-nil, open in another window."
+  (interactive "sNamed scratchpad name: \nP")
+  (when (string-empty-p name)
+    (user-error "Name cannot be empty"))
+  (let* ((dest (scratchpad-named-path name))
+         (existing (scratchpad--find-named-buffer name))
+         (bufname (format "*scratch* [%s]" name))
+         (buf (or existing (get-buffer-create bufname)))
+         (newp (and (not (file-exists-p dest)) (null existing))))
+    (with-current-buffer buf
+      (unless existing
+        (erase-buffer)
+        (when (file-exists-p dest) (insert-file-contents dest))
+        (when newp (insert (format "#+TITLE: %s\n\n" name)))
+        (scratchpad-mode)
+        (setq-local scratchpad-associated-file dest)
+        (setq-local scratchpad-buffer-name-local name)))
+    (if other-window
+        (switch-to-buffer-other-window buf)
+      (switch-to-buffer buf))
+    (message "Named scratchpad: %s" name)))
+
+;;;###autoload
+(defun scratchpad-open-named (name &optional other-window)
+  "Open an existing named scratchpad buffer by NAME.
+
+With OTHER-WINDOW non-nil, open in another window."
+  (interactive
+   (list (completing-read
+          "Open named scratchpad: "
+          (let ((dir scratchpad-named-directory))
+            (when (file-directory-p dir)
+              (mapcar (lambda (f) (file-name-sans-extension f))
+                      (directory-files dir nil "\\.org$"))))
+          nil t)
+         current-prefix-arg))
+  (scratchpad-create-named name other-window))
+
+;;;###autoload
+(defun scratchpad-list-named ()
+  "List all existing named scratchpad buffers."
+  (interactive)
+  (let ((dir scratchpad-named-directory))
+    (if (file-directory-p dir)
+        (let ((files (directory-files dir nil "\\.org$")))
+          (if files
+              (message "Named scratchpads: %s"
+                       (mapconcat (lambda (f) (file-name-sans-extension f))
+                                  files ", "))
+            (message "No named scratchpads found")))
+      (message "Named scratchpad directory does not exist: %s" dir))))
+
+;;
 ;;; File-associated scratchpads
 
 ;;;###autoload
@@ -222,8 +308,6 @@ handled by scratchpad APIs."
         (erase-buffer)
         (when (file-exists-p dest) (insert-file-contents dest))
         (when newp (insert (format "#+TITLE: Scratch for %s\n\n" src)))
-        (unless (eq major-mode scratchpad-major-mode-initial)
-          (funcall scratchpad-major-mode-initial))
         (scratchpad-mode)
         (setq-local scratchpad-associated-file dest)))
     (switch-to-buffer-other-window buf)
@@ -244,10 +328,8 @@ With OTHER-WINDOW non-nil, open in another window."
       (erase-buffer)
       (when (file-exists-p dest)
         (insert-file-contents dest))
-      (when (and newp (fboundp 'org-mode))
+      (when newp
         (insert (format "#+TITLE: Scratch for %s\n\n" file)))
-      (unless (eq major-mode scratchpad-major-mode-initial)
-        (funcall scratchpad-major-mode-initial))
       (scratchpad-mode)
       (setq-local scratchpad-associated-file dest))
     (if other-window
@@ -264,14 +346,13 @@ With OTHER-WINDOW non-nil, open in another window."
   (setq initial-scratch-message nil)
   (scratchpad--ensure-dir scratchpad-save-directory)
   (scratchpad--ensure-dir scratchpad-file-assoc-directory)
+  (scratchpad--ensure-dir scratchpad-named-directory)
   (unless (file-exists-p scratchpad-current-metadata-file)
     (with-temp-file scratchpad-current-metadata-file
       (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))))
     (message "Scratchpad metadata file created"))
   (scratchpad-restore-contents)
   (with-current-buffer (get-buffer-create scratchpad-buffer-name)
-    (unless (eq major-mode scratchpad-major-mode-initial)
-      (funcall scratchpad-major-mode-initial))
     (scratchpad-mode)
     (run-hooks 'scratchpad-initialize-hook)))
 
@@ -284,7 +365,7 @@ If text is selected in the current buffer, append it to scratch."
   (interactive)
   (if (string= (buffer-name) scratchpad-buffer-name)
       (progn
-        (scratchpad-save-buffer)  ;; only when inside scratch
+        (scratchpad-save-buffer)
         (delete-window))
     (let ((selected-text (when (region-active-p)
                            (buffer-substring-no-properties
@@ -326,11 +407,11 @@ If BUFFER is nil, save the current buffer."
                            scratchpad-current-file))))
         (unless dest
           (user-error "No associated backing file for: %s" (buffer-name buf)))
+        (scratchpad--ensure-dir (file-name-directory dest))
         (save-restriction
           (widen)
           (write-region (point-min) (point-max) dest))
         (when (string= (buffer-name buf) scratchpad-buffer-name)
-          ;; keep metadata for main scratch
           (unless (file-exists-p scratchpad-current-metadata-file)
             (with-temp-file scratchpad-current-metadata-file
               (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))))))
@@ -379,16 +460,12 @@ Records both creation and archive timestamps in a PROPERTIES drawer."
          (archived-ts (current-time)))
     (when (and scratch-content (not (string-empty-p scratch-content)))
       (with-temp-buffer
-        ;; Org heading
         (insert (format "* %s\n" (format-time-string "%I:%M %p" created-ts)))
-        ;; Properties drawer
         (insert ":PROPERTIES:\n")
         (insert (format ":CREATED_AT: %s\n" (format-time-string "<%Y-%m-%d %I:%M %p>" created-ts)))
         (insert (format ":ARCHIVED_AT: %s\n" (format-time-string "<%Y-%m-%d %I:%M %p>" archived-ts)))
         (insert ":END:\n\n")
-        ;; Content
         (insert scratch-content "\n\n")
-        ;; Append to archive file
         (append-to-file (point-min) (point-max) archive-file))
       (message "Archived scratchpad to %s" archive-file))))
 
