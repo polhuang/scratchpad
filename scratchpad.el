@@ -185,8 +185,8 @@ Example:
          (safe (replace-regexp-in-string "[/\\\\:*?\"<>|]" "__" abs)))
     (replace-regexp-in-string "__+" "__" safe)))
 
-(defun scratchpad--find-buffer-by-associated-file (file)
-  "Return an open scratchpad buffer whose associated file matches FILE.
+(defun scratchpad--find-scratchpad-by-associated-file (file)
+  "Return an open scratchpad whose associated file matches FILE.
 
 Checks the buffer-local `scratchpad-associated-file`.  Return nil if none."
   (let ((abs (expand-file-name file)))
@@ -208,8 +208,8 @@ Checks the buffer-local `scratchpad-associated-file`.  Return nil if none."
 ;;
 ;;; Named scratchpads
 
-(defun scratchpad--find-named-buffer (name)
-  "Return an open named scratchpad buffer with NAME.
+(defun scratchpad--find-named-scratchpad (name)
+  "Return an open named scratchpad with NAME.
 
 Checks the buffer-local `scratchpad-buffer-name-local`.  Return nil if none."
   (seq-find
@@ -225,15 +225,23 @@ Checks the buffer-local `scratchpad-buffer-name-local`.  Return nil if none."
     (expand-file-name (format scratchpad-named-filename-format name) dir)))
 
 ;;;###autoload
-(defun scratchpad-create-named (name &optional other-window)
-  "Create or open a named scratchpad buffer with NAME.
+(defun scratchpad-open-named (name &optional other-window)
+  "Open or create a named scratchpad buffer with NAME.
 
 With OTHER-WINDOW non-nil, open in another window."
-  (interactive "sNamed scratchpad name: \nP")
+  (interactive
+   (list (completing-read
+          "Open named scratchpad: "
+          (let ((dir scratchpad-named-directory))
+            (when (file-directory-p dir)
+              (mapcar (lambda (f) (file-name-sans-extension f))
+                      (directory-files dir nil "\\.org$"))))
+          nil nil)
+         current-prefix-arg))
   (when (string-empty-p name)
     (user-error "Name cannot be empty"))
   (let* ((dest (scratchpad-named-path name))
-         (existing (scratchpad--find-named-buffer name))
+         (existing (scratchpad--find-named-scratchpad name))
          (bufname (format "*scratch* [%s]" name))
          (buf (or existing (get-buffer-create bufname)))
          (newp (and (not (file-exists-p dest)) (null existing))))
@@ -255,36 +263,6 @@ With OTHER-WINDOW non-nil, open in another window."
         (switch-to-buffer-other-window buf)
       (switch-to-buffer buf))
     (message "Named scratchpad: %s" name)))
-
-;;;###autoload
-(defun scratchpad-open-named (name &optional other-window)
-  "Open an existing named scratchpad buffer by NAME.
-
-With OTHER-WINDOW non-nil, open in another window."
-  (interactive
-   (list (completing-read
-          "Open named scratchpad: "
-          (let ((dir scratchpad-named-directory))
-            (when (file-directory-p dir)
-              (mapcar (lambda (f) (file-name-sans-extension f))
-                      (directory-files dir nil "\\.org$"))))
-          nil t)
-         current-prefix-arg))
-  (scratchpad-create-named name other-window))
-
-;;;###autoload
-(defun scratchpad-list-named ()
-  "List all existing named scratchpad buffers."
-  (interactive)
-  (let ((dir scratchpad-named-directory))
-    (if (file-directory-p dir)
-        (let ((files (directory-files dir nil "\\.org$")))
-          (if files
-              (message "Named scratchpads: %s"
-                       (mapconcat (lambda (f) (file-name-sans-extension f))
-                                  files ", "))
-            (message "No named scratchpads found")))
-      (message "Named scratchpad directory does not exist: %s" dir))))
 
 ;;
 ;;; File-associated scratchpads
@@ -310,7 +288,7 @@ handled by scratchpad APIs."
   (let* ((src (or (buffer-file-name)
                   (user-error "Current buffer is not visiting a file")))
          (dest (scratchpad-file-associated-path src))
-         (existing (scratchpad--find-buffer-by-associated-file dest))
+         (existing (scratchpad--find-scratchpad-by-associated-file dest))
          (buf (or existing (get-buffer-create (scratchpad--make-buffer-name src))))
          (newp (and (not (file-exists-p dest)) (null existing))))
     (with-current-buffer buf
@@ -545,6 +523,202 @@ With OTHER-WINDOW non-nil, open in another window."
     (message "Opened archived scratchpad: %s" archive-file)))
 
 ;;;###autoload
+(defun scratchpad-open-latest-by-date (date &optional other-window)
+  "Open archived scratchpad by DATE showing only the most recent entry content.
+
+With OTHER-WINDOW non-nil, open in another window."
+  (interactive
+   (list (completing-read
+          "Open latest entry from archived scratchpad (date): "
+          (directory-files scratchpad-save-directory nil "^[0-9]\\{4\\}-[0-9]\\{2\\}-[0-9]\\{2\\}\\.org$")
+          nil t)
+         current-prefix-arg))
+  (let* ((archive-file (expand-file-name date scratchpad-save-directory))
+         (bufname (format "*scratch-latest* [%s]" date))
+         (buf (get-buffer-create bufname))
+         (content ""))
+    (with-temp-buffer
+      (insert-file-contents archive-file)
+      (goto-char (point-max))
+      (when (re-search-backward "^\\* " nil t)
+        ;; Skip the header line and properties drawer to get actual content
+        (forward-line 1)
+        (when (looking-at ":PROPERTIES:")
+          (re-search-forward "^:END:" nil t)
+          (forward-line 1))
+        ;; Skip any blank lines
+        (while (and (not (eobp)) (looking-at "^\\s-*$"))
+          (forward-line 1))
+        (let ((start (point))
+              (end (if (re-search-forward "^\\* " nil t)
+                       (progn
+                         ;; Go back to before the next header and remove trailing whitespace
+                         (goto-char (match-beginning 0))
+                         (skip-chars-backward " \t\n")
+                         (point))
+                     ;; No next header, go to end but remove trailing whitespace
+                     (goto-char (point-max))
+                     (skip-chars-backward " \t\n")
+                     (point))))
+          (setq content (buffer-substring-no-properties start end)))))
+    (with-current-buffer buf
+      (erase-buffer)
+      (insert content)
+      (scratchpad-mode)
+      (goto-char (point-min)))
+    (if other-window
+        (switch-to-buffer-other-window buf)
+      (switch-to-buffer buf))
+    (message "Showing latest entry from %s" archive-file)))
+
+;;;###autoload
+(defun scratchpad-open-latest-for-current-file ()
+  "Open scratchpad for current file showing only the most recent entry content."
+  (interactive)
+  (let* ((src (or (buffer-file-name)
+                  (user-error "Current buffer is not visiting a file")))
+         (archive-file (scratchpad-file-associated-path src))
+         (bufname (format "*scratch-latest* [%s]" (file-name-nondirectory src)))
+         (buf (get-buffer-create bufname))
+         (content ""))
+    (when (file-exists-p archive-file)
+      (with-temp-buffer
+        (insert-file-contents archive-file)
+        (goto-char (point-max))
+        (when (re-search-backward "^\\* " nil t)
+          ;; Skip the header line and properties drawer to get actual content
+          (forward-line 1)
+          (when (looking-at ":PROPERTIES:")
+            (re-search-forward "^:END:" nil t)
+            (forward-line 1))
+          ;; Skip any blank lines
+          (while (and (not (eobp)) (looking-at "^\\s-*$"))
+            (forward-line 1))
+          (let ((start (point))
+                (end (if (re-search-forward "^\\* " nil t)
+                         (progn
+                           ;; Go back to before the next header and remove trailing whitespace
+                           (goto-char (match-beginning 0))
+                           (skip-chars-backward " \t\n")
+                           (point))
+                       ;; No next header, go to end but remove trailing whitespace
+                       (goto-char (point-max))
+                       (skip-chars-backward " \t\n")
+                       (point))))
+            (setq content (buffer-substring-no-properties start end))))))
+    (with-current-buffer buf
+      (erase-buffer)
+      (if (string-empty-p content)
+          (insert "No archived entries found.")
+        (insert content))
+      (scratchpad-mode)
+      (goto-char (point-min)))
+    (switch-to-buffer-other-window buf)
+    (message "Showing latest entry for %s" src)))
+
+;;;###autoload
+(defun scratchpad-open-latest-for-file (file &optional other-window)
+  "Open scratchpad for FILE showing only the most recent entry content.
+
+With OTHER-WINDOW non-nil, open in another window."
+  (interactive "fFile: \nP")
+  (let* ((archive-file (scratchpad-file-associated-path file))
+         (bufname (format "*scratch-latest* [%s]" (file-name-nondirectory file)))
+         (buf (get-buffer-create bufname))
+         (content ""))
+    (when (file-exists-p archive-file)
+      (with-temp-buffer
+        (insert-file-contents archive-file)
+        (goto-char (point-max))
+        (when (re-search-backward "^\\* " nil t)
+          ;; Skip the header line and properties drawer to get actual content
+          (forward-line 1)
+          (when (looking-at ":PROPERTIES:")
+            (re-search-forward "^:END:" nil t)
+            (forward-line 1))
+          ;; Skip any blank lines
+          (while (and (not (eobp)) (looking-at "^\\s-*$"))
+            (forward-line 1))
+          (let ((start (point))
+                (end (if (re-search-forward "^\\* " nil t)
+                         (progn
+                           ;; Go back to before the next header and remove trailing whitespace
+                           (goto-char (match-beginning 0))
+                           (skip-chars-backward " \t\n")
+                           (point))
+                       ;; No next header, go to end but remove trailing whitespace
+                       (goto-char (point-max))
+                       (skip-chars-backward " \t\n")
+                       (point))))
+            (setq content (buffer-substring-no-properties start end))))))
+    (with-current-buffer buf
+      (erase-buffer)
+      (if (string-empty-p content)
+          (insert "No archived entries found.")
+        (insert content))
+      (scratchpad-mode)
+      (goto-char (point-min)))
+    (if other-window
+        (switch-to-buffer-other-window buf)
+      (switch-to-buffer buf))
+    (message "Showing latest entry for %s" file)))
+
+;;;###autoload
+(defun scratchpad-open-latest-named (name &optional other-window)
+  "Open named scratchpad showing only the most recent entry content.
+
+With OTHER-WINDOW non-nil, open in another window."
+  (interactive
+   (list (completing-read
+          "Open latest entry from named scratchpad: "
+          (let ((dir scratchpad-named-directory))
+            (when (file-directory-p dir)
+              (mapcar (lambda (f) (file-name-sans-extension f))
+                      (directory-files dir nil "\\.org$"))))
+          nil nil)
+         current-prefix-arg))
+  (let* ((archive-file (scratchpad-named-path name))
+         (bufname (format "*scratch-latest* [%s]" name))
+         (buf (get-buffer-create bufname))
+         (content ""))
+    (when (file-exists-p archive-file)
+      (with-temp-buffer
+        (insert-file-contents archive-file)
+        (goto-char (point-max))
+        (when (re-search-backward "^\\* " nil t)
+          ;; Skip the header line and properties drawer to get actual content
+          (forward-line 1)
+          (when (looking-at ":PROPERTIES:")
+            (re-search-forward "^:END:" nil t)
+            (forward-line 1))
+          ;; Skip any blank lines
+          (while (and (not (eobp)) (looking-at "^\\s-*$"))
+            (forward-line 1))
+          (let ((start (point))
+                (end (if (re-search-forward "^\\* " nil t)
+                         (progn
+                           ;; Go back to before the next header and remove trailing whitespace
+                           (goto-char (match-beginning 0))
+                           (skip-chars-backward " \t\n")
+                           (point))
+                       ;; No next header, go to end but remove trailing whitespace
+                       (goto-char (point-max))
+                       (skip-chars-backward " \t\n")
+                       (point))))
+            (setq content (buffer-substring-no-properties start end))))))
+    (with-current-buffer buf
+      (erase-buffer)
+      (if (string-empty-p content)
+          (insert "No archived entries found.")
+        (insert content))
+      (scratchpad-mode)
+      (goto-char (point-min)))
+    (if other-window
+        (switch-to-buffer-other-window buf)
+      (switch-to-buffer buf))
+    (message "Showing latest entry for named scratchpad: %s" name)))
+
+;;;###autoload
 (defun scratchpad-menu-open ()
   "Show the scratchpad menu."
   (interactive)
@@ -582,26 +756,23 @@ With OTHER-WINDOW non-nil, open in another window."
 (transient-define-prefix scratchpad-menu ()
   "Scratchpad menu."
   [
-   ["Main scratch buffer"
-    ("n" "New scratchpad page"                  scratchpad-toggle-new)]
+   ["New scratch buffer"
+    ("n" "Archive & create new scratch buffer"  scratchpad-toggle-new)]
    ["Save scratch buffer"
     ("s" "Save current scratch buffer"          scratchpad-save-buffer)
     ("S" "Save ALL scratch buffers"             scratchpad-save-all-buffers)]
-   ["Open scratch buffer"
-    ("d" "Open scratchpad by date"              scratchpad-open-by-date)
-    ("f" "Open scratchpad for current file"     scratchpad-open-for-current-file)
-    ("F" "Open for file…"                       scratchpad-open-for-file)]
-   ["Named scratch buffers"
-    ("c" "Create/open named buffer"             scratchpad-create-named)
-    ("o" "Open existing named buffer"           scratchpad-open-named)
-    ("l" "List named buffers"                   scratchpad-list-named)
-    ("a" "Archive named buffer"                 scratchpad-archive-named-buffer)]
-   ["Toggles"
-    ("x" "Toggle save on exit"                  scratchpad-toggle-autosave-on-exit)
-    ("X" "Toggle save on focus change"          scratchpad-toggle-autosave-on-focus-change)]
-   ["Settings"
-    ("i" "Set autosave interval"                scratchpad-set-autosave-interval)]
-   ["Help"
+   ["Open latest scratchpad page"
+    ("d" "By date"                              scratchpad-open-latest-by-date)
+    ("f" "For current file"                     scratchpad-open-latest-for-current-file)
+    ("F" "For file…"                            scratchpad-open-latest-for-file)
+    ("n" "by name"                              scratchpad-open-latest-named)]
+   ["Open scratchpad file"
+    ("d" "By date"                              scratchpad-open-by-date)
+    ("f" "For current file"                     scratchpad-open-for-current-file)
+    ("F" "For file…"                            scratchpad-open-for-file)
+    ("n" "by name"                              scratchpad-open-named)]
+   ["Commands"
+    ("" "Quit"                                 transient-quit-one)
     ("." "Quit"                                 transient-quit-one)]
    ])
 
