@@ -583,7 +583,7 @@ With OTHER-WINDOW non-nil, open in another window."
   "Scratchpad menu."
   [
    ["Main scratch buffer"
-    ("n" "New scratch buffer"                   scratchpad-toggle-new)]
+    ("n" "New scratchpad page"                  scratchpad-toggle-new)]
    ["Save scratch buffer"
     ("s" "Save current scratch buffer"          scratchpad-save-buffer)
     ("S" "Save ALL scratch buffers"             scratchpad-save-all-buffers)]
