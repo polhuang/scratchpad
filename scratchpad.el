@@ -366,6 +366,26 @@ If text is selected in the current buffer, append it to scratch."
     (scratchpad-other-window)))
 
 ;;;###autoload
+(defun scratchpad-open-main (&optional other-window)
+  "Open the main scratchpad buffer.
+
+If text is selected in the current buffer, append it to the main scratchpad.
+With OTHER-WINDOW non-nil, open in another window."
+  (interactive "P")
+  (let ((selected-text (when (region-active-p)
+                         (buffer-substring-no-properties
+                          (region-beginning) (region-end))))
+        (buf (get-buffer-create scratchpad-buffer-name)))
+    (when selected-text
+      (with-current-buffer buf
+        (goto-char (point-max))
+        (unless (bolp) (insert "\n"))
+        (insert selected-text "\n")))
+    (if other-window
+        (switch-to-buffer-other-window buf)
+      (switch-to-buffer buf))))
+
+;;;###autoload
 (defun scratchpad-other-window ()
   "Open the main *scratch* buffer in a new window."
   (interactive)
