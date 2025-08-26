@@ -697,6 +697,7 @@ With OTHER-WINDOW non-nil, open in another window."
     
     (with-current-buffer buf
       (erase-buffer)
+      (insert content)
       (scratchpad-mode)
       (setq-local scratchpad-associated-file archive-file)
       (goto-char (point-min)))
