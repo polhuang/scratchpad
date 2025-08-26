@@ -35,7 +35,7 @@
 ;; - Main scratchpad: Persistent buffer with periodic autosave and archiving
 ;; - File-associated scratchpads: Dedicated scratch buffers linked to specific files
 ;; - Named scratchpads: Custom-named scratch buffers for organizing notes by topic
-;; - Smart archiving: Main scratchpad saves by overwriting, others append with timestamps
+;; - Smart archiving: Main scratchpad saves by overwriting, others archive with timestamps or overwrite latest entry
 ;; - Text capture: Automatically append selected text when opening scratchpad buffers
 ;; - Latest entry viewing: Quick access to most recent content from archived entries
 ;; - Cycling navigation: Easy switching between different scratchpad types
@@ -416,7 +416,9 @@ With OTHER-WINDOW non-nil, open in another window."
   "Save a scratchpad BUFFER to its backing file.
 
 For main scratchpad: saves by overwriting.
-For file-associated and named scratchpads: archives with timestamp.
+For file-associated and named scratchpads: 
+  - If no entries exist yet, archives with timestamp
+  - If entries exist, overwrites the content of the latest entry
 If BUFFER is nil, save the current buffer."
   (interactive)
   (let ((buf (or buffer (current-buffer))))
@@ -442,21 +444,54 @@ If BUFFER is nil, save the current buffer."
                 (with-temp-file scratchpad-current-metadata-file
                   (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time)))))
               (message "Scratchpad saved: %s" dest))
-          ;; File-associated or named scratchpad: archive with timestamp
+          ;; File-associated or named scratchpad: archive with timestamp if no entries, otherwise overwrite latest entry
           (when (and buffer-content (not (string-empty-p buffer-content)))
-            (let* ((created-ts (or (ignore-errors
-                                     (nth 5 (file-attributes dest)))
-                                   (current-time)))
-                   (archived-ts (current-time)))
-              (with-temp-buffer
-                (insert (format "* %s\n" (format-time-string "%m/%d/%Y %I:%M %p" archived-ts)))
-                (insert ":PROPERTIES:\n")
-                (insert (format ":CREATED_AT: %s\n" (format-time-string "<%m/%d/%Y %I:%M %p>" created-ts)))
-                (insert (format ":ARCHIVED_AT: %s\n" (format-time-string "<%m/%d/%Y %I:%M %p>" archived-ts)))
-                (insert ":END:\n\n")
-                (insert buffer-content "\n\n")
-                (append-to-file (point-min) (point-max) dest))
-              (message "Scratchpad archived to %s" dest))))))))
+            (let* ((file-exists (file-exists-p dest))
+                   (has-entries nil))
+              ;; Check if file exists and has entries
+              (when file-exists
+                (with-temp-buffer
+                  (insert-file-contents dest)
+                  (setq has-entries (re-search-forward "^\\* " nil t))))
+              
+              (if has-entries
+                  ;; File has entries - overwrite the latest entry content
+                  (with-temp-buffer
+                    (insert-file-contents dest)
+                    (goto-char (point-max))
+                    (when (re-search-backward "^\\* " nil t)
+                      ;; Found the latest entry, move to content area
+                      (forward-line 1)
+                      (when (looking-at ":PROPERTIES:")
+                        (re-search-forward "^:END:" nil t)
+                        (forward-line 1))
+                      ;; Skip any blank lines
+                      (while (and (not (eobp)) (looking-at "^\\s-*$"))
+                        (forward-line 1))
+                      ;; Delete existing content
+                      (let ((content-start (point))
+                            (content-end (if (re-search-forward "^\\* " nil t)
+                                             (match-beginning 0)
+                                           (point-max))))
+                        (delete-region content-start content-end)
+                        ;; Insert new content
+                        (insert buffer-content "\n\n")))
+                    (write-region (point-min) (point-max) dest)
+                    (message "Scratchpad updated: %s" dest))
+                ;; No entries exist - archive with timestamp
+                (let* ((created-ts (or (ignore-errors
+                                         (nth 5 (file-attributes dest)))
+                                       (current-time)))
+                       (archived-ts (current-time)))
+                  (with-temp-buffer
+                    (insert (format "* %s\n" (format-time-string "%m/%d/%Y %I:%M %p" archived-ts)))
+                    (insert ":PROPERTIES:\n")
+                    (insert (format ":CREATED_AT: %s\n" (format-time-string "<%m/%d/%Y %I:%M %p>" created-ts)))
+                    (insert (format ":ARCHIVED_AT: %s\n" (format-time-string "<%m/%d/%Y %I:%M %p>" archived-ts)))
+                    (insert ":END:\n\n")
+                    (insert buffer-content "\n\n")
+                    (append-to-file (point-min) (point-max) dest))
+                  (message "Scratchpad archived to %s" dest))))))))))
 
 ;;;###autoload
 (defun scratchpad-save-all-buffers ()
