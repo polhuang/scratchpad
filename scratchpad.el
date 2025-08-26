@@ -149,11 +149,11 @@ Example:
 
 (defvar scratchpad-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c .") #'scratchpad-menu-open)
+    (define-key map (kbd "C-c C-.") #'scratchpad-menu-open)
     (define-key map (kbd "C-c C-s") #'scratchpad-save-buffer)
     (define-key map (kbd "C-c C-a") #'scratchpad-archive-buffer)
     (define-key map (kbd "C-c M-a") #'scratchpad-archive-named-buffer)
-    (define-key map (kbd "C-c C-n") #'scratchpad-toggle-new)
+    (define-key map (kbd "C-c C-n") #'scratchpad-new)
     map)
   "Keymap for `scratchpad-mode'.")
 
@@ -346,24 +346,16 @@ With OTHER-WINDOW non-nil, open in another window."
 
 ;;;###autoload
 (defun scratchpad-toggle ()
-  "Toggle the main scratchpad window.
+  "Toggle scratchpad buffers.
 
-If currently in the scratchpad buffer, save and close its window.
-If text is selected in the current buffer, append it to scratch."
+If currently in a scratchpad buffer, save and close its window.
+Otherwise, open the main scratchpad buffer."
   (interactive)
-  (if (string= (buffer-name) scratchpad-buffer-name)
+  (if (derived-mode-p 'scratchpad-mode)
       (progn
         (scratchpad-save-buffer)
         (delete-window))
-    (let ((selected-text (when (region-active-p)
-                           (buffer-substring-no-properties
-                            (region-beginning) (region-end)))))
-      (when selected-text
-        (with-current-buffer (get-buffer-create scratchpad-buffer-name)
-          (goto-char (point-max))
-          (set-mark (point))
-          (insert selected-text "\n"))))
-    (scratchpad-other-window)))
+    (scratchpad-open-main t)))
 
 ;;;###autoload
 (defun scratchpad-open-main (&optional other-window)
@@ -376,8 +368,10 @@ With OTHER-WINDOW non-nil, open in another window."
                          (buffer-substring-no-properties
                           (region-beginning) (region-end))))
         (buf (get-buffer-create scratchpad-buffer-name)))
-    (when selected-text
-      (with-current-buffer buf
+    (with-current-buffer buf
+      (unless (derived-mode-p 'scratchpad-mode)
+        (scratchpad-mode))
+      (when selected-text
         (goto-char (point-max))
         (unless (bolp) (insert "\n"))
         (insert selected-text "\n")))
@@ -389,7 +383,11 @@ With OTHER-WINDOW non-nil, open in another window."
 (defun scratchpad-other-window ()
   "Open the main *scratch* buffer in a new window."
   (interactive)
-  (switch-to-buffer-other-window (get-buffer-create scratchpad-buffer-name)))
+  (let ((buf (get-buffer-create scratchpad-buffer-name)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'scratchpad-mode)
+        (scratchpad-mode)))
+    (switch-to-buffer-other-window buf)))
 
 ;;;###autoload
 (defun scratchpad-restore-contents ()
@@ -404,6 +402,8 @@ With OTHER-WINDOW non-nil, open in another window."
 (defun scratchpad-save-buffer (&optional buffer)
   "Save a scratchpad BUFFER to its backing file.
 
+For main scratchpad: saves by overwriting.
+For file-associated and named scratchpads: archives with timestamp.
 If BUFFER is nil, save the current buffer."
   (interactive)
   (let ((buf (or buffer (current-buffer))))
@@ -412,18 +412,38 @@ If BUFFER is nil, save the current buffer."
         (user-error "Not in a scratchpad buffer: %s" (buffer-name buf)))
       (let ((dest (or scratchpad-associated-file
                       (and (string= (buffer-name buf) scratchpad-buffer-name)
-                           scratchpad-current-file))))
+                           scratchpad-current-file)))
+            (is-main (string= (buffer-name buf) scratchpad-buffer-name))
+            (buffer-content (buffer-string)))
         (unless dest
           (user-error "No associated backing file for: %s" (buffer-name buf)))
         (scratchpad--ensure-dir (file-name-directory dest))
-        (save-restriction
-          (widen)
-          (write-region (point-min) (point-max) dest))
-        (when (string= (buffer-name buf) scratchpad-buffer-name)
-          (unless (file-exists-p scratchpad-current-metadata-file)
-            (with-temp-file scratchpad-current-metadata-file
-              (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time))))))
-        (message "Scratchpad saved: %s" dest)))))
+        
+        (if is-main
+            ;; Main scratchpad: save by overwriting
+            (progn
+              (save-restriction
+                (widen)
+                (write-region (point-min) (point-max) dest))
+              (unless (file-exists-p scratchpad-current-metadata-file)
+                (with-temp-file scratchpad-current-metadata-file
+                  (insert (format-time-string "%Y-%m-%dT%H:%M:%S" (current-time)))))
+              (message "Scratchpad saved: %s" dest))
+          ;; File-associated or named scratchpad: archive with timestamp
+          (when (and buffer-content (not (string-empty-p buffer-content)))
+            (let* ((created-ts (or (ignore-errors
+                                     (nth 5 (file-attributes dest)))
+                                   (current-time)))
+                   (archived-ts (current-time)))
+              (with-temp-buffer
+                (insert (format "* %s\n" (format-time-string "%I:%M %p" archived-ts)))
+                (insert ":PROPERTIES:\n")
+                (insert (format ":CREATED_AT: %s\n" (format-time-string "<%Y-%m-%d %I:%M %p>" created-ts)))
+                (insert (format ":ARCHIVED_AT: %s\n" (format-time-string "<%Y-%m-%d %I:%M %p>" archived-ts)))
+                (insert ":END:\n\n")
+                (insert buffer-content "\n\n")
+                (append-to-file (point-min) (point-max) dest))
+              (message "Scratchpad archived to %s" dest)))))))))
 
 ;;;###autoload
 (defun scratchpad-save-all-buffers ()
@@ -505,7 +525,7 @@ Records both creation and archive timestamps in a PROPERTIES drawer."
       (message "Archived named scratchpad '%s' to %s" name archive-file))))
 
 ;;;###autoload
-(defun scratchpad-toggle-new ()
+(defun scratchpad-new ()
   "Archive and wipe the main scratchpad, then start a new one."
   (interactive)
   (with-current-buffer (get-buffer-create scratchpad-buffer-name)
@@ -739,6 +759,82 @@ With OTHER-WINDOW non-nil, open in another window."
     (message "Showing latest entry for named scratchpad: %s" name)))
 
 ;;;###autoload
+(defun scratchpad-cycle ()
+  "Cycle between main scratchpad, current file's latest, and named scratchpads.
+
+Cycling order:
+1. Main scratchpad
+2. Current file's latest scratchpad (if file exists and has entries)
+3. Named scratchpads (cycling through all available ones)
+
+The cycle state is tracked per Emacs session."
+  (interactive)
+  (let* ((current-buf (current-buffer))
+         (current-name (buffer-name current-buf))
+         (is-scratchpad (derived-mode-p 'scratchpad-mode))
+         (is-main (string= current-name scratchpad-buffer-name))
+         (is-latest (string-match-p "^\\*scratch-latest\\*" current-name))
+         (is-named (and is-scratchpad scratchpad-buffer-name-local))
+         (current-file (buffer-file-name))
+         (has-file-scratchpad (and current-file
+                                   (file-exists-p (scratchpad-file-associated-path current-file))))
+         (named-scratchpads (when (file-directory-p scratchpad-named-directory)
+                              (mapcar (lambda (f) (file-name-sans-extension f))
+                                      (directory-files scratchpad-named-directory nil "\\.org$"))))
+         (cycle-state (get 'scratchpad-cycle 'state))
+         (named-index (get 'scratchpad-cycle 'named-index)))
+    
+    (cond
+     ;; If not in a scratchpad or in main, try to go to file's latest
+     ((or (not is-scratchpad) is-main)
+      (if has-file-scratchpad
+          (progn
+            (put 'scratchpad-cycle 'state 'file-latest)
+            (scratchpad-open-latest-for-current-file))
+        ;; Skip to named if no file scratchpad
+        (if named-scratchpads
+            (progn
+              (put 'scratchpad-cycle 'state 'named)
+              (put 'scratchpad-cycle 'named-index 0)
+              (scratchpad-open-latest-named (car named-scratchpads) t))
+          ;; No named either, go back to main
+          (progn
+            (put 'scratchpad-cycle 'state 'main)
+            (scratchpad-open-main t)))))
+     
+     ;; If in file's latest, go to first named scratchpad
+     (is-latest
+      (if named-scratchpads
+          (progn
+            (put 'scratchpad-cycle 'state 'named)
+            (put 'scratchpad-cycle 'named-index 0)
+            (scratchpad-open-latest-named (car named-scratchpads) t))
+        ;; No named, go back to main
+        (progn
+          (put 'scratchpad-cycle 'state 'main)
+          (scratchpad-open-main t))))
+     
+     ;; If in a named scratchpad, cycle to next named or back to main
+     (is-named
+      (let ((current-named-name scratchpad-buffer-name-local)
+            (next-index (if named-index (1+ named-index) 0)))
+        (if (and (< next-index (length named-scratchpads))
+                 (not (string= current-named-name (nth next-index named-scratchpads))))
+            (progn
+              (put 'scratchpad-cycle 'named-index next-index)
+              (scratchpad-open-latest-named (nth next-index named-scratchpads) t))
+          ;; End of named scratchpads, go back to main
+          (progn
+            (put 'scratchpad-cycle 'state 'main)
+            (put 'scratchpad-cycle 'named-index nil)
+            (scratchpad-open-main t)))))
+     
+     ;; Default: go to main
+     (t
+      (put 'scratchpad-cycle 'state 'main)
+      (scratchpad-open-main t)))))
+
+;;;###autoload
 (defun scratchpad-menu-open ()
   "Show the scratchpad menu."
   (interactive)
@@ -777,12 +873,11 @@ With OTHER-WINDOW non-nil, open in another window."
   "Scratchpad menu."
   [
    ["New scratch buffer"
-    ("n" "Archive & create new scratch buffer"  scratchpad-toggle-new)]
+    ("n" "Archive & start new scratch buffer"   scratchpad-new)]
    ["Save scratch buffer"
     ("s" "Save current scratch buffer"          scratchpad-save-buffer)
     ("S" "Save ALL scratch buffers"             scratchpad-save-all-buffers)]
-   ["Open latest scratchpad page"
-    ("d" "By date"                              scratchpad-open-latest-by-date)
+   ["Open scratch buffer"
     ("f" "For current file"                     scratchpad-open-latest-for-current-file)
     ("F" "For file…"                            scratchpad-open-latest-for-file)
     ("n" "by name"                              scratchpad-open-latest-named)]
@@ -792,7 +887,7 @@ With OTHER-WINDOW non-nil, open in another window."
     ("F" "For file…"                            scratchpad-open-for-file)
     ("n" "by name"                              scratchpad-open-named)]
    ["Commands"
-    ("" "Quit"                                 transient-quit-one)
+    ("'" "Cycle scratch buffers"                scratchpad-cycle)
     ("." "Quit"                                 transient-quit-one)]
    ])
 
