@@ -27,17 +27,30 @@
 
 ;;; Commentary:
 
-;; scratchpad provides a persistent scratch buffer with autosave, archiving,
-;; and text capturing capabilities. It also supports creating scratch buffers
-;; linked to individual files, giving you a dedicated place to jot down notes
-;; associated with each file.
+;; scratchpad provides a persistent scratch buffer system with autosave, archiving,
+;; and text capturing capabilities. It supports three types of scratchpad buffers:
+;; main, file-associated, and named scratchpads.
 ;;
 ;; Features:
-;; - Persistent scratch buffers that automatically save periodically.
-;; - Create and manage scratch buffers associated with specific files.
-;; - Archive scratchpad contents with timestamps to organize past notes.
-;; - Integrated with org-mode for structured note-taking.
-;; - Supports toggling scratch windows and capturing highlighted text into the buffer quickly
+;; - Main scratchpad: Persistent buffer with periodic autosave and archiving
+;; - File-associated scratchpads: Dedicated scratch buffers linked to specific files
+;; - Named scratchpads: Custom-named scratch buffers for organizing notes by topic
+;; - Smart archiving: Main scratchpad saves by overwriting, others append with timestamps
+;; - Text capture: Automatically append selected text when opening scratchpad buffers
+;; - Latest entry viewing: Quick access to most recent content from archived entries
+;; - Cycling navigation: Easy switching between different scratchpad types
+;; - Integrated with org-mode for structured note-taking
+;; - Transient menu interface for all operations
+;;
+;; Key Functions:
+;; - `scratchpad-toggle`: Smart toggle between scratchpad buffers
+;; - `scratchpad-cycle`: Cycle through main, file-associated, and named scratchpads
+;; - `scratchpad-open-main`: Open main scratchpad (captures selected text)
+;; - `scratchpad-open-for-current-file`: Create/open scratchpad for current file
+;; - `scratchpad-open-named`: Create/open named scratchpad
+;; - `scratchpad-open-latest-*`: View latest archived entries
+;; - `scratchpad-new`: Archive current content and start fresh
+;; - `scratchpad-save-buffer`: Save/archive scratchpad content
 ;;
 
 
